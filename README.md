@@ -1,20 +1,62 @@
-# Expo Router Example
+# 🏠 HouseHunter
 
-Use [`expo-router`](https://docs.expo.dev/router/introduction/) to build native navigation using files in the `app/` directory.
+A modern, cross-platform house hunting app for property owners, agents, and tenants. Built with React Native, Expo, and Firebase.
 
-## 🚀 How to use
+## 🚀 Vision
+HouseHunter aims to be the go-to platform for discovering, listing, and managing rental properties. This MVP demonstrates the core features and sets the foundation for a collaborative, scalable product. Join the team and help shape the future of house hunting!
 
+## ✨ Features
+- User authentication (Firebase Auth)
+- Property listing creation and management
+- Search and filter properties
+- Favorites system
+- Responsive, mobile-first UI
+- Persistent login (native and web)
+- Modern codebase (TypeScript, hooks, modular structure)
+
+## 🛠️ Tech Stack
+- React Native (Expo)
+- Firebase (Auth, Firestore)
+- TypeScript
+- React Native Paper (UI)
+
+## 📦 Getting Started
+
+### 1. Clone the repo
 ```sh
-npx create-expo-app -e with-router
+git clone https://github.com/YOUR_GITHUB_USERNAME/househunter.git
+cd househunter
 ```
 
-## Deploy
+### 2. Install dependencies
+```sh
+npm install
+```
 
-Deploy on all platforms with Expo Application Services (EAS).
+### 3. Set up Firebase
+- Create a Firebase project at [firebase.google.com](https://firebase.google.com/)
+- Enable **Email/Password** authentication
+- Create a Firestore database
+- Copy your Firebase config to `src/services/firebase/firebaseConfig.js`
+- (Optional) Add your config to a `.env` file for security
 
-- Deploy the website: `npx eas-cli deploy` — [Learn more](https://docs.expo.dev/eas/hosting/get-started/)
-- Deploy on iOS and Android using: `npx eas-cli build` — [Learn more](https://expo.dev/eas)
+### 4. Run the app
+```sh
+npx expo start
+```
+- Use Expo Go on your phone, or an Android/iOS emulator
 
-## 📝 Notes
+## 🧑‍💻 Contributing / Joining the Team
+- Fork the repo and open a pull request
+- Open an issue to introduce yourself and your ideas
+- All skill levels welcome! Let's build something great together
 
-- [Expo Router: Docs](https://docs.expo.dev/router/introduction/)
+## 📸 Screenshots
+*Add screenshots here to showcase the app*
+
+## 📄 License
+MIT
+
+---
+
+*Built with ❤️ by the HouseHunter team. Join us and help revolutionize the rental experience!*
