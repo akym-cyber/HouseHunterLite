@@ -6,6 +6,7 @@ module.exports = {
     plugins: ['expo-router', 'expo-font'],
     name: 'HouseHunter',
     slug: 'HouseHunter',
+    platforms: ['ios', 'android'],
     android: {
       package: 'com.anonymous.HouseHunter'
     },
