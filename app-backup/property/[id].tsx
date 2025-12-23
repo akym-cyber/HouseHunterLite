@@ -1,0 +1,529 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Text,
+  Card,
+  Title,
+  Button,
+  Chip,
+  Divider,
+  IconButton,
+  FAB,
+} from 'react-native-paper';
+import { useLocalSearchParams, router } from 'expo-router';
+import { useProperties } from '../../src/hooks/useProperties';
+import { useAuth } from '../../src/hooks/useAuth';
+import { useFavorites } from '../../src/hooks/useFavorites';
+import { defaultTheme } from '../../src/styles/theme';
+import { Property } from '../../src/types/database';
+import { formatPrice } from '../../src/utils/constants';
+import { Video, ResizeMode } from 'expo-av';
+
+const { width } = Dimensions.get('window');
+
+export default function PropertyDetailsScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  const { getPropertyById, deleteProperty } = useProperties();
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const [property, setProperty] = useState<Property | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      fetchProperty();
+    }
+  }, [id]);
+
+  const fetchProperty = async () => {
+    if (!id) return;
+    
+    setLoading(true);
+    const result = await getPropertyById(id);
+    
+    if (result.success && result.data) {
+      setProperty(result.data);
+    } else {
+      Alert.alert('Error', 'Failed to load property details');
+    }
+    setLoading(false);
+  };
+
+  const handleContactOwner = async () => {
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to contact the owner');
+      return;
+    }
+
+    if (!property) return;
+
+    // Check if user is trying to contact themselves
+    if (user.id === property.ownerId) {
+      Alert.alert('Error', 'You cannot contact yourself');
+      return;
+    }
+
+    // Navigate to chat/messages screen
+    router.push('/(tabs)/messages');
+  };
+
+  const handleScheduleViewing = () => {
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to schedule a viewing');
+      return;
+    }
+    
+    // TODO: Navigate to scheduling screen
+    Alert.alert('Coming Soon', 'Viewing scheduling will be available soon!');
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to save favorites');
+      return;
+    }
+    
+    if (!property) return;
+    
+    const result = await toggleFavorite(property.id);
+    if (!result.success) {
+      Alert.alert('Error', result.error || 'Failed to update favorite');
+    }
+  };
+
+  const handleEditProperty = () => {
+    if (!property) return;
+    router.push(`/property/edit/${property.id}`);
+  };
+
+  const handleDeleteProperty = () => {
+    if (!property) return;
+
+    Alert.alert(
+      'Delete Property',
+      'Are you sure you want to delete this property? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeleting(true);
+            try {
+              const result = await deleteProperty(property.id);
+              if (result.success) {
+                Alert.alert('Success', 'Property deleted successfully');
+                router.replace('/(tabs)'); // Navigate to home tab
+              } else {
+                Alert.alert('Error', result.error || 'Failed to delete property');
+              }
+            } finally {
+              setIsDeleting(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Loading property details...</Text>
+      </View>
+    );
+  }
+
+  if (!property) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text>Property not found</Text>
+      </View>
+    );
+  }
+
+  // DEBUG LOGGING - Add this to check if property data is loading
+  console.log("🔍 Property Details - property object:", property);
+  console.log("🔍 Property Details - is property null?", !property);
+  console.log("🔍 Property Details - property keys:", property ? Object.keys(property) : "NULL");
+  console.log("🔍 Property Details - specific fields:", {
+    propertyType: property.propertyType,
+    bedrooms: property.bedrooms,
+    bathrooms: property.bathrooms,
+    squareFeet: property.squareFeet
+  });
+
+  // After existing console logs, add:
+  console.log("🔍 CHECKING DATABASE FOR MARKDOWN:");
+  console.log("Full property object:", JSON.stringify(property, null, 2));
+
+  // Check each field for pipes
+  Object.keys(property).forEach(key => {
+    const value = property[key];
+    if (typeof value === 'string' && value.includes("|")) {
+      console.log(`⚠️  FIELD "${key}" CONTAINS MARKDOWN:`, value);
+    }
+  });
+
+  // Also check if any nested objects/arrays contain markdown
+  if (property.amenities) {
+    property.amenities.forEach((amenity, index) => {
+      if (amenity.includes("|")) {
+        console.log(`⚠️  AMENITY[${index}] HAS MARKDOWN:`, amenity);
+      }
+    });
+  }
+
+  const isOwner = user?.id === property.ownerId;
+
+  return (
+    <View style={styles.container}>
+      <ScrollView style={styles.scrollView}>
+        {/* Media Gallery */}
+        <View style={styles.imageContainer}>
+          {property.primaryImageUrl || property.media?.length ? (
+            property.media && property.media.length > 0 ? (
+              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+                {property.media.map((m, idx) => (
+                  <View key={idx} style={{ width }}>
+                    {m.type === 'image' ? (
+                      <Card.Cover source={{ uri: m.url }} style={styles.mainImage} />
+                    ) : (
+                      <Video
+                        source={{ uri: m.url }}
+                        style={styles.mainImage}
+                        useNativeControls
+                        resizeMode={ResizeMode.COVER}
+                      />
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Card.Cover source={{ uri: property.primaryImageUrl! }} style={styles.mainImage} />
+            )
+          ) : (
+            <Card.Cover
+              source={{ uri: 'https://via.placeholder.com/400x300?text=Property+Image' }}
+              style={styles.mainImage}
+            />
+          )}
+          <IconButton
+            icon={isFavorite(property.id) ? 'heart' : 'heart-outline'}
+            iconColor={isFavorite(property.id) ? 'red' : 'white'}
+            size={30}
+            style={styles.favoriteButton}
+            onPress={handleToggleFavorite}
+          />
+        </View>
+
+        {/* Property Header */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title style={styles.propertyTitle}>{property.title}</Title>
+            <Text style={styles.propertyLocation}>
+              📍 {property.addressLine1}, {property.city}, {property.state} {property.postalCode}
+            </Text>
+            <Text style={styles.propertyPrice}>
+              {formatPrice(property.price, property.county || property.city)}
+            </Text>
+            {property.deposit && (
+              <Text style={styles.propertyDeposit}>
+                Deposit: {formatPrice(property.deposit, property.county || property.city)}
+              </Text>
+            )}
+          </Card.Content>
+        </Card>
+
+        {/* Property Details */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title style={styles.sectionTitle}>Property Details</Title>
+            <View style={styles.detailsGrid}>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Type</Text>
+                <Text style={styles.detailValue}>{property.propertyType}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Bedrooms</Text>
+                <Text style={styles.detailValue}>{property.bedrooms}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Bathrooms</Text>
+                <Text style={styles.detailValue}>{property.bathrooms}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Square Feet</Text>
+                <Text style={styles.detailValue}>
+                  {property.squareFeet ? `${property.squareFeet} sq ft` : 'N/A'}
+                </Text>
+              </View>
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Amenities */}
+        {property.amenities && property.amenities.length > 0 && (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Title style={styles.sectionTitle}>Amenities</Title>
+              <View style={styles.amenitiesContainer}>
+                {property.amenities.map((amenity, index) => (
+                  <Chip key={index} style={styles.amenityChip}>
+                    {amenity}
+                  </Chip>
+                ))}
+              </View>
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* Property Features */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title style={styles.sectionTitle}>Features</Title>
+            <View style={styles.featuresContainer}>
+              <Chip
+                icon={property.furnished ? 'check' : 'close'}
+                style={styles.featureChip}
+              >
+                {property.furnished ? 'Furnished' : 'Unfurnished'}
+              </Chip>
+              <Chip
+                icon={property.petFriendly ? 'check' : 'close'}
+                style={styles.featureChip}
+              >
+                {property.petFriendly ? 'Pet Friendly' : 'No Pets'}
+              </Chip>
+              <Chip
+                icon={property.parkingAvailable ? 'check' : 'close'}
+                style={styles.featureChip}
+              >
+                {property.parkingAvailable ? 'Parking Available' : 'No Parking'}
+              </Chip>
+              <Chip
+                icon={property.utilitiesIncluded ? 'check' : 'close'}
+                style={styles.featureChip}
+              >
+                {property.utilitiesIncluded ? 'Utilities Included' : 'Utilities Not Included'}
+              </Chip>
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Description */}
+        {property.description && (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Title style={styles.sectionTitle}>Description</Title>
+              <Text style={styles.description}>{property.description}</Text>
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* Availability */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title style={styles.sectionTitle}>Availability</Title>
+            <Text style={styles.availabilityStatus}>
+              Status: {property.status.charAt(0).toUpperCase() + property.status.slice(1)}
+            </Text>
+            {property.availableDate && (
+              <Text style={styles.availableDate}>
+                Available: {new Date(property.availableDate).toLocaleDateString()}
+              </Text>
+            )}
+          </Card.Content>
+        </Card>
+      </ScrollView>
+
+      {/* Action Buttons */}
+      <SafeAreaView edges={['bottom']} style={styles.safeAreaContainer}>
+        <View style={styles.actionContainer}>
+          {isOwner ? (
+            <>
+              <Button
+                mode="contained"
+                onPress={handleEditProperty}
+                style={styles.actionButton}
+                icon="pencil"
+              >
+                Edit Property
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={handleDeleteProperty}
+                style={[styles.actionButton, styles.deleteButton]}
+                icon="delete"
+                textColor="#d32f2f"
+                disabled={isDeleting}
+                loading={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Property'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                mode="contained"
+                onPress={handleContactOwner}
+                style={styles.actionButton}
+                icon="message"
+              >
+                Contact Owner
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={handleScheduleViewing}
+                style={styles.actionButton}
+                icon="calendar"
+              >
+                Schedule Viewing
+              </Button>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: defaultTheme.colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  imageContainer: {
+    position: 'relative',
+  },
+  mainImage: {
+    height: 250,
+    width: width,
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  card: {
+    margin: 16,
+    marginTop: 8,
+    elevation: 2,
+    borderRadius: 8,
+  },
+  propertyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  propertyLocation: {
+    color: defaultTheme.colors.onSurfaceVariant,
+    marginBottom: 8,
+  },
+  propertyPrice: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: defaultTheme.colors.primary,
+    marginBottom: 4,
+  },
+  propertyDeposit: {
+    color: defaultTheme.colors.onSurfaceVariant,
+    fontSize: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  detailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+  },
+  detailItem: {
+    flex: 1,
+    minWidth: '45%',
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: defaultTheme.colors.onSurfaceVariant,
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  amenitiesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  amenityChip: {
+    marginBottom: 8,
+  },
+  featuresContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  featureChip: {
+    marginBottom: 8,
+  },
+  description: {
+    lineHeight: 20,
+    color: defaultTheme.colors.onSurfaceVariant,
+  },
+  availabilityStatus: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  availableDate: {
+    color: defaultTheme.colors.onSurfaceVariant,
+  },
+  actionContainer: {
+    padding: 16,
+    backgroundColor: defaultTheme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: defaultTheme.colors.outline,
+  },
+  actionButton: {
+    marginBottom: 8,
+  },
+  deleteButton: {
+    borderColor: defaultTheme.colors.error,
+  },
+  safeAreaContainer: {
+    backgroundColor: defaultTheme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: defaultTheme.colors.outline,
+  },
+});
+
+// Force client-side rendering, disable static generation
+export const dynamic = 'force-dynamic';
+export const unstable_settings = {
+  initialRouteName: 'index',
+};
