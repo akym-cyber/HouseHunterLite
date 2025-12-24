@@ -1,9 +1,9 @@
-// src/services/firebase/firebaseConfig.ts - ULTIMATE SAFE VERSION
+// src/services/firebase/firebaseConfig.ts - WEB-SAFE VERSION
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { initializeAuth, Auth, getReactNativePersistence } from 'firebase/auth';
+import { initializeAuth, Auth, browserSessionPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -24,15 +24,22 @@ let _storage: FirebaseStorage | null = null;
 
 function initializeFirebase() {
   if (!_app) {
-    try {   
-    
+    try {
       _app = initializeApp(firebaseConfig);
-      _auth = initializeAuth(_app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
+
+      // Web-safe auth initialization
+      if (Platform.OS === 'web') {
+        _auth = initializeAuth(_app, {
+          persistence: browserSessionPersistence, // Use session persistence for web
+        });
+      } else {
+        // For native platforms, we'll initialize auth later to avoid import issues
+        _auth = initializeAuth(_app);
+      }
+
       _db = getFirestore(_app);
       _storage = getStorage(_app);
-      console.log('✅ Firebase initialized successfully');
+      console.log('✅ Firebase initialized successfully for', Platform.OS);
     } catch (error) {
       console.error('❌ Firebase initialization failed:', error);
       throw error;
@@ -75,4 +82,4 @@ export const checkFirebaseConnection = async () => {
   } catch (error) {
     return { connected: false, error: 'Connection failed' };
   }
-};  
+};
