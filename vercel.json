@@ -1,4 +1,42 @@
 {
-  "buildCommand": "echo \"Skipping Expo web build\"",
-  "outputDirectory": "public"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "installCommand": "npm install",
+  "buildCommand": "npm install react-native-web@^0.21.0 && npx expo export -p web",
+  "outputDirectory": "dist",
+  "devCommand": "npx expo start --web", 
+  "framework": null,
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "github": {
+    "silent": true 
+  },
+  "regions": ["sfo1"], 
+  "headers": [
+    {
+      "source": "/_expo/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ],
+  "rewrites": [
+    { 
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://api.yourdomain.com/:path*", 
+      "permanent": false
+    }
+  ]
 }
