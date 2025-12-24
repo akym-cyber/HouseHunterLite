@@ -6,30 +6,36 @@ module.exports = {
     plugins: ['expo-router', 'expo-font'],
     name: 'HouseHunter',
     slug: 'HouseHunter',
-    version: '1.0.0', // Add version
+    version: '1.0.0',
     platforms: ['ios', 'android', 'web'],
-    orientation: 'portrait', // Set orientation
-    icon: './assets/icon.png', // Required for builds
+    orientation: 'portrait',
+    icon: './assets/icon.png',
     userInterfaceStyle: 'light',
     splash: {
-      image: './assets/splash.png', // Required for builds
+      image: './assets/splash.png',
       resizeMode: 'contain',
       backgroundColor: '#ffffff'
     },
-    assetBundlePatterns: ['**/*'], // Bundle all assets
+    assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.anonymous.HouseHunter' // Add iOS bundle ID
+      bundleIdentifier: 'com.anonymous.HouseHunter'
     },
     android: {
       package: 'com.anonymous.HouseHunter',
-      adaptiveIcon: { // Required for Android 8+
+      adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#ffffff'
       }
     },
+    // ✅ CRITICAL: ADD WEB CONFIG
     web: {
-      favicon: './assets/favicon.png' // If supporting web
+      favicon: './assets/favicon.png',
+      bundler: 'metro',
+      output: 'single', // Important for proper static export
+      build: {
+        output: 'dist' // Explicitly tell Expo to output to 'dist'
+      }
     },
     extra: {
       eas: {

@@ -2,16 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "installCommand": "npm install",
-  "buildCommand": "npm install react-native-web@^0.21.0 && npx expo export -p web",
+  "name": "HouseHunter",
+  "buildCommand": "npx expo export -p web",
   "outputDirectory": "dist",
-  "devCommand": "npx expo start --web", 
+  "devCommand": "npx expo start --web",
   "framework": null,
   "cleanUrls": true,
   "trailingSlash": false,
   "github": {
-    "silent": true 
+    "silent": true
   },
-  "regions": ["sfo1"], 
+  "regions": ["sfo1"],
   "headers": [
     {
       "source": "/_expo/static/(.*)",
@@ -30,13 +31,6 @@
     { 
       "source": "/(.*)",
       "destination": "/index.html"
-    }
-  ],
-  "redirects": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://api.yourdomain.com/:path*", 
-      "permanent": false
     }
   ]
 }
