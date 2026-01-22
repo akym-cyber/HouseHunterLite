@@ -27,9 +27,7 @@ function initializeFirebase() {
     try {   
     
       _app = initializeApp(firebaseConfig);
-      _auth = initializeAuth(_app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
+      _auth = initializeAuth(_app);
       _db = getFirestore(_app);
       _storage = getStorage(_app);
       console.log('✅ Firebase initialized successfully');
@@ -75,4 +73,4 @@ export const checkFirebaseConnection = async () => {
   } catch (error) {
     return { connected: false, error: 'Connection failed' };
   }
-};  
+};

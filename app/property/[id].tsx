@@ -22,6 +22,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useFavorites } from '../../src/hooks/useFavorites';
+import { useMessages } from '../../src/hooks/useMessages';
 import { defaultTheme } from '../../src/styles/theme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
@@ -34,6 +35,7 @@ export default function PropertyDetailsScreen() {
   const { user } = useAuth();
   const { getPropertyById, deleteProperty } = useProperties();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { findConversationByProperty, createConversation } = useMessages();
   const [property, setProperty] = useState<Property | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -72,8 +74,29 @@ export default function PropertyDetailsScreen() {
       return;
     }
 
-    // Navigate to chat/messages screen
-    router.push('/(tabs)/messages');
+    try {
+      // First, try to find an existing conversation for this property and owner
+      const findResult = await findConversationByProperty(property.id, property.ownerId);
+
+      if (findResult.success && findResult.data) {
+        // Conversation exists, navigate to it
+        router.push(`/chat/${findResult.data.id}`);
+        return;
+      }
+
+      // No existing conversation, create a new one
+      const createResult = await createConversation(property.id, property.ownerId);
+
+      if (createResult.success && createResult.data) {
+        // Navigate to the newly created conversation
+        router.push(`/chat/${createResult.data.id}`);
+      } else {
+        Alert.alert('Error', createResult.error || 'Failed to start conversation');
+      }
+    } catch (error) {
+      console.error('Error contacting owner:', error);
+      Alert.alert('Error', 'Failed to start conversation. Please try again.');
+    }
   };
 
   const handleScheduleViewing = () => {

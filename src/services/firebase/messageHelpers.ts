@@ -93,6 +93,30 @@ export const conversationHelpers = {
     }
   },
 
+  // Find conversation by property and participants
+  async findConversationByPropertyAndParticipants(propertyId: string, participant1Id: string, participant2Id: string): Promise<FirestoreResponse<Conversation | null>> {
+    try {
+      const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
+      const q = query(
+        conversationsRef,
+        where('property_id', '==', propertyId),
+        where('participant1_id', 'in', [participant1Id, participant2Id]),
+        where('participant2_id', 'in', [participant1Id, participant2Id])
+      );
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        const doc = querySnapshot.docs[0];
+        return { data: { id: doc.id, ...doc.data() } as Conversation, error: null };
+      }
+
+      return { data: null, error: null };
+    } catch (error: any) {
+      console.error('Error finding conversation:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
   // Update conversation last message time
   async updateConversationLastMessage(conversationId: string): Promise<FirestoreResponse<Conversation>> {
     try {
@@ -100,7 +124,7 @@ export const conversationHelpers = {
       await updateDoc(conversationRef, {
         last_message_at: serverTimestamp()
       });
-      
+
       return { data: { id: conversationId } as Conversation, error: null };
     } catch (error: any) {
       console.error('Error updating conversation:', error);
@@ -255,6 +279,9 @@ export const messageHelpers = {
 
   // Create conversation (alias for conversationHelpers)
   createConversation: conversationHelpers.createConversation,
+
+  // Find conversation by property and participants
+  findConversationByPropertyAndParticipants: conversationHelpers.findConversationByPropertyAndParticipants,
 
   // Add new inquiry
   async addInquiry(inquiryData: Omit<Inquiry, 'id' | 'created_at' | 'updated_at'>): Promise<FirestoreResponse<Inquiry>> {

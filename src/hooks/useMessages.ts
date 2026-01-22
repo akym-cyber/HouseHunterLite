@@ -254,6 +254,28 @@ export const useMessages = () => {
     }
   };
 
+  const findConversationByProperty = async (propertyId: string, otherUserId: string) => {
+    try {
+      if (!user) {
+        return { success: false, error: 'User not authenticated' };
+      }
+
+      const result = await messageHelpers.findConversationByPropertyAndParticipants(
+        propertyId,
+        user.id,
+        otherUserId
+      );
+
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      return { success: true, data: result.data };
+    } catch (error: any) {
+      return { success: false, error: 'Failed to find conversation' };
+    }
+  };
+
   const sendInquiry = async (inquiryData: {
     propertyId: string;
     ownerId: string;
@@ -329,6 +351,7 @@ export const useMessages = () => {
     fetchMessages,
     sendMessage,
     createConversation,
+    findConversationByProperty,
     sendInquiry,
     markMessageAsRead,
     refreshConversations,

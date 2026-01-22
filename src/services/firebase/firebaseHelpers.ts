@@ -277,31 +277,44 @@ export const favoriteHelpers = {
   // Get favorites by user
   async getFavoritesByUser(userId: string): Promise<FirestoreResponse<Property[]>> {
     try {
+      console.log('🔍 favoriteHelpers: Getting favorites for user:', userId);
       const favoritesRef = collection(db, COLLECTIONS.FAVORITES);
       const q = query(
         favoritesRef,
         where('user_id', '==', userId),
         orderBy('created_at', 'desc')
       );
+
+      console.log('🔍 favoriteHelpers: Executing favorites query...');
       const querySnapshot = await getDocs(q);
-      
+      console.log('🔍 favoriteHelpers: Query returned', querySnapshot.size, 'documents');
+
       const favoriteIds: string[] = [];
       querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-        favoriteIds.push(doc.data().property_id);
+        const data = doc.data();
+        console.log('🔍 favoriteHelpers: Favorite doc:', doc.id, '->', data);
+        favoriteIds.push(data.property_id);
       });
+
+      console.log('🔍 favoriteHelpers: Found favorite property IDs:', favoriteIds);
 
       // Get the actual property data for each favorite
       const properties: Property[] = [];
       for (const propertyId of favoriteIds) {
+        console.log('🔍 favoriteHelpers: Fetching property:', propertyId);
         const propertyResult = await propertyHelpers.getPropertyById(propertyId);
         if (propertyResult.data) {
+          console.log('🔍 favoriteHelpers: Property found:', propertyResult.data.title);
           properties.push(propertyResult.data);
+        } else {
+          console.log('🔍 favoriteHelpers: Property NOT found:', propertyId);
         }
       }
-      
+
+      console.log('🔍 favoriteHelpers: Returning', properties.length, 'properties');
       return { data: properties, error: null };
     } catch (error: any) {
-      console.error('Error getting favorites:', error);
+      console.error('🔍 favoriteHelpers: Error getting favorites:', error);
       return { data: null, error: error.message };
     }
   },
@@ -376,4 +389,4 @@ export default {
   propertyHelpers,
   userHelpers,
   favoriteHelpers
-}; 
+};
