@@ -1,10 +1,13 @@
 {
   "expo": {
     "scheme": "acme",
-    "plugins": [
-      
-    ],
     "name": "HouseHunter",
-    "slug": "HouseHunter"
+    "slug": "HouseHunter",
+
+    "plugins": [],
+
+    "web": {
+      "bundler": "metro"
+    }
   }
 }
