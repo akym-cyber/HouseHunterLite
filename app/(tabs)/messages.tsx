@@ -17,6 +17,7 @@ import {
   Searchbar,
 } from 'react-native-paper';
 import { router } from 'expo-router';
+import { auth } from '../../src/services/firebase/firebaseConfig';
 import { useMessages } from '../../src/hooks/useMessages';
 import { useAuth } from '../../src/hooks/useAuth';
 import { defaultTheme } from '../../src/styles/theme';
@@ -51,6 +52,58 @@ export default function MessagesScreen() {
   const { conversations, loading, error, refreshConversations, unreadCount, isOnline } = useMessages();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [authCheckDone, setAuthCheckDone] = useState(false);
+
+  // 🔍 COMPREHENSIVE DEBUGGING
+  useEffect(() => {
+    console.log('🔍 ===== MESSAGES SCREEN DEBUG =====');
+    console.log('🔍 User:', user);
+    console.log('🔍 User ID:', user?.id);
+    console.log('🔍 User UID:', user?.uid);
+    console.log('🔍 Loading:', loading);
+    console.log('🔍 Error:', error);
+    console.log('🔍 Conversations COUNT:', conversations?.length);
+    console.log('🔍 Conversations DATA:', conversations);
+    console.log('🔍 Conversations RAW:', JSON.stringify(conversations, null, 2));
+
+    // Check if it's an array
+    console.log('🔍 Is Array?:', Array.isArray(conversations));
+
+    // Check if empty array or null/undefined
+    if (conversations && Array.isArray(conversations)) {
+      console.log('🔍 First conversation:', conversations[0]);
+      console.log('🔍 All IDs:', conversations.map(c => c?.id));
+    }
+
+    console.log('🔍 Unread Count:', unreadCount);
+    console.log('🔍 Is Online:', isOnline);
+    console.log('🔍 ===== END DEBUG =====');
+  }, [conversations, loading, error, user]);
+
+  // 🔍 DEBUG: Check what useAuth() returns
+  useEffect(() => {
+    console.log('🔍 DEBUG - useAuth() user object:', {
+      hasUser: !!user,
+      user: user,
+      userId: user?.id,
+      userEmail: user?.email,
+      userUid: user?.uid,
+      allKeys: user ? Object.keys(user) : 'no user'
+    });
+
+    // Check if it's actually Firebase auth issue
+    console.log('🔍 Firebase auth currentUser:', auth.currentUser);
+  }, [user]);
+
+  // Auth check timeout protection
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthCheckDone(true);
+      console.log('⏰ Auth check timeout reached');
+    }, 3000); // 3 second timeout
+
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     console.log("📱 Messages Screen - User:", user?.id);
@@ -160,8 +213,8 @@ export default function MessagesScreen() {
     </View>
   );
 
-  // Show loading spinner if user is not available or initial loading
-  if (!user || loading) {
+  // Show loading spinner only for initial data fetch, not auth check
+  if (loading && conversations.length === 0) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -170,7 +223,49 @@ export default function MessagesScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
           <Text style={styles.loadingText}>
-            {!user ? 'Authenticating...' : 'Loading conversations...'}
+            Loading conversations...
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Separate auth check with timeout protection
+  if (!user && authCheckDone) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Title style={styles.headerTitle}>Messages</Title>
+        </View>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorIcon}>🔐</Text>
+          <Title style={styles.errorTitle}>Authentication Required</Title>
+          <Text style={styles.errorText}>
+            Please sign in to view your messages
+          </Text>
+          <Button
+            mode="contained"
+            onPress={() => router.push('/(auth)/login')}
+            style={styles.retryButton}
+          >
+            Sign In
+          </Button>
+        </View>
+      </View>
+    );
+  }
+
+  // If no user but timeout not reached, show minimal loading
+  if (!user && !authCheckDone) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Title style={styles.headerTitle}>Messages</Title>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+          <Text style={styles.loadingText}>
+            Checking authentication...
           </Text>
         </View>
       </View>

@@ -30,6 +30,15 @@ export const useMessages = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
 
+  // Add console logs for returns
+  console.log('🔥 useMessages returning:', {
+    conversationsCount: state.conversations.length,
+    loading: state.loading,
+    error: state.error,
+    unreadCount,
+    isOnline
+  });
+
   // Real-time conversation listener
   useEffect(() => {
     if (!user) {

@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
   updateProfile,
   User as FirebaseUser
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase/firebaseConfig';
 import { userHelpers } from '../services/firebase/firebaseHelpers';
 import { User } from '../types/database';
@@ -43,6 +44,24 @@ export const useAuth = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // DEV MODE: Force logout on app start for easy testing (only once per app launch)
+    const checkAndForceLogout = async () => {
+      if (__DEV__) {
+        try {
+          const hasForcedLogout = await AsyncStorage.getItem('dev_force_logout_done');
+          if (!hasForcedLogout) {
+            await signOut(auth);
+            console.log("DEV MODE: Forced sign out (first time only)");
+            await AsyncStorage.setItem('dev_force_logout_done', 'true');
+          }
+        } catch (error) {
+          console.error("DEV MODE: Error checking force logout flag:", error);
+        }
+      }
+    };
+
+    checkAndForceLogout();
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Get additional user data from Firestore
@@ -225,4 +244,4 @@ export const useAuth = () => {
     resetPassword,
     updateUserProfile
   };
-}; 
+};
