@@ -1,9 +1,8 @@
-// src/services/firebase/firebaseConfig.ts - ULTIMATE SAFE VERSION
-import { initializeApp, FirebaseApp } from 'firebase/app';
-import { initializeAuth, Auth, getReactNativePersistence } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// src/services/firebase/firebaseConfig.ts
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -16,61 +15,12 @@ const firebaseConfig = {
   measurementId: "G-S9R969V605"
 };
 
-// Lazy initialization to avoid "Component auth has not been registered yet"
-let _app: FirebaseApp | null = null;
-let _auth: Auth | null = null;
-let _db: Firestore | null = null;
-let _storage: FirebaseStorage | null = null;
+// ✅ SINGLE initialization
+export const app = initializeApp(firebaseConfig);
 
-function initializeFirebase() {
-  if (!_app) {
-    try {   
-    
-      _app = initializeApp(firebaseConfig);
-      _auth = initializeAuth(_app);
-      _db = getFirestore(_app);
-      _storage = getStorage(_app);
-      console.log('✅ Firebase initialized successfully');
-    } catch (error) {
-      console.error('❌ Firebase initialization failed:', error);
-      throw error;
-    }
-  }
-  return { app: _app!, auth: _auth!, db: _db!, storage: _storage! };
-}
+// ✅ SIMPLE + STABLE auth
+export const auth = getAuth(app);
 
-// Getter functions that initialize on first access
-export const getApp = (): FirebaseApp => {
-  const { app } = initializeFirebase();
-  return app;
-};
- 
-export const getAuth = (): Auth => {
-  const { auth } = initializeFirebase();
-  return auth;
-};
-
-export const getDb = (): Firestore => {
-  const { db } = initializeFirebase();
-  return db;
-};
-
-export const getStorageInstance = (): FirebaseStorage => {
-  const { storage } = initializeFirebase();
-  return storage;
-};
-
-// Also export the initialized instances for backward compatibility
-export const app = getApp();
-export const auth = getAuth();
-export const db = getDb();
-export const storage = getStorageInstance();
-
-// Network connection checker
-export const checkFirebaseConnection = async () => {
-  try {
-    return { connected: true };
-  } catch (error) {
-    return { connected: false, error: 'Connection failed' };
-  }
-};
+// ✅ Firestore + Storage
+export const db = getFirestore(app);
+export const storage = getStorage(app);

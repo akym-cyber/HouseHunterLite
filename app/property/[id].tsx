@@ -185,20 +185,7 @@ export default function PropertyDetailsScreen() {
     squareFeet: property.squareFeet
   });
 
-  // Add this check after your existing debug logs but before the loading/error returns
-  console.log("🔍 PLATFORM CHECK:", Platform.OS, "is web?", Platform.OS === 'web');
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.container}>
-        <Text>WEB VERSION - Different rendering</Text>
-        <Text>Platform detected: {Platform.OS}</Text>
-        <Text>Property ID: {id}</Text>
-        <Text>Type: {property?.propertyType}</Text>
-        <Text>Bedrooms: {property?.bedrooms}</Text>
-        <Text>Bathrooms: {property?.bathrooms}</Text>
-      </View>
-    );
-  }
+
 
   const isOwner = user?.id === property.ownerId;
 
