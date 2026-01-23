@@ -6,28 +6,16 @@ import { Snackbar } from 'react-native-paper';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 export const NetworkStatus: React.FC = () => {
-  const { isConnected, isFirebaseConnected, error, retryConnection } = useNetworkStatus();
+  const { isConnected } = useNetworkStatus();
 
-  const showWarning = !isConnected || !isFirebaseConnected;
-  const message = !isConnected 
-    ? 'No internet connection' 
-    : !isFirebaseConnected 
-    ? 'Firebase connection failed. Some features may be limited.'
-    : '';
+  const showWarning = !isConnected;
+  const message = !isConnected ? 'No internet connection' : '';
 
   return (
     <Snackbar
       visible={showWarning}
       onDismiss={() => {}}
-      action={{
-        label: isFirebaseConnected ? 'Dismiss' : 'Retry',
-        onPress: () => {
-          if (!isFirebaseConnected) {
-            retryConnection();
-          }
-        },
-      }}
-      duration={Snackbar.DURATION_INDEFINITE}
+      duration={999999}
       style={styles.snackbar}
     >
       {message}
