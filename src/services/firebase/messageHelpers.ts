@@ -35,43 +35,46 @@ export const conversationHelpers = {
   // Get conversations by user
   async getConversationsByUser(userId: string): Promise<FirestoreResponse<Conversation[]>> {
     try {
+      console.log('[getConversationsByUser] Fetching conversations for user:', userId);
+
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
+
+      // Query conversations where user is in participants array
       const q = query(
         conversationsRef,
-        where('participant1_id', '==', userId)
+        where('participants', 'array-contains', userId)
       );
+
+      console.log('[getConversationsByUser] Executing query with userId:', userId);
       const querySnapshot = await getDocs(q);
-      
+
+      console.log('[getConversationsByUser] Query returned', querySnapshot.size, 'documents');
+
       const conversations: Conversation[] = [];
       querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-        conversations.push({
-          id: doc.id,
-          ...doc.data()
-        } as Conversation);
-      });
+        const data = doc.data();
+        console.log('[getConversationsByUser] Conversation ID:', doc.id, 'participants:', data.participants);
 
-      // Also get conversations where user is participant2
-      const q2 = query(
-        conversationsRef,
-        where('participant2_id', '==', userId)
-      );
-      const querySnapshot2 = await getDocs(q2);
-      
-      querySnapshot2.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
+        // Validate participants array structure
+        if (!data.participants || !Array.isArray(data.participants)) {
+          console.warn('[getConversationsByUser] Conversation', doc.id, 'missing or invalid participants array:', data.participants);
+        }
+
         conversations.push({
           id: doc.id,
-          ...doc.data()
+          ...data
         } as Conversation);
       });
 
       // Sort by last message time
-      conversations.sort((a, b) => 
+      conversations.sort((a, b) =>
         new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
       );
-      
+
+      console.log('[getConversationsByUser] Returning', conversations.length, 'conversations');
       return { data: conversations, error: null };
     } catch (error: any) {
-      console.error('Error getting conversations:', error);
+      console.error('[getConversationsByUser] Error getting conversations:', error);
       return { data: null, error: error.message };
     }
   },
@@ -96,23 +99,36 @@ export const conversationHelpers = {
   // Find conversation by property and participants
   async findConversationByPropertyAndParticipants(propertyId: string, participant1Id: string, participant2Id: string): Promise<FirestoreResponse<Conversation | null>> {
     try {
+      console.log('[findConversationByPropertyAndParticipants] Searching for conversation with propertyId:', propertyId, 'participants:', [participant1Id, participant2Id]);
+
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
       const q = query(
         conversationsRef,
         where('property_id', '==', propertyId),
-        where('participant1_id', 'in', [participant1Id, participant2Id]),
-        where('participant2_id', 'in', [participant1Id, participant2Id])
+        where('participants', 'array-contains', participant1Id)
       );
-      const querySnapshot = await getDocs(q);
 
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        return { data: { id: doc.id, ...doc.data() } as Conversation, error: null };
+      const querySnapshot = await getDocs(q);
+      console.log('[findConversationByPropertyAndParticipants] Query returned', querySnapshot.size, 'documents');
+
+      // Find conversation that contains both participants
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        console.log('[findConversationByPropertyAndParticipants] Checking conversation', doc.id, 'participants:', data.participants);
+
+        if (data.participants &&
+            Array.isArray(data.participants) &&
+            data.participants.includes(participant1Id) &&
+            data.participants.includes(participant2Id)) {
+          console.log('[findConversationByPropertyAndParticipants] Found matching conversation:', doc.id);
+          return { data: { id: doc.id, ...data } as Conversation, error: null };
+        }
       }
 
+      console.log('[findConversationByPropertyAndParticipants] No matching conversation found');
       return { data: null, error: null };
     } catch (error: any) {
-      console.error('Error finding conversation:', error);
+      console.error('[findConversationByPropertyAndParticipants] Error finding conversation:', error);
       return { data: null, error: error.message };
     }
   },
@@ -138,25 +154,31 @@ export const messageHelpers = {
   // Get messages by conversation
   async getMessagesByConversation(conversationId: string): Promise<FirestoreResponse<Message[]>> {
     try {
-      const messagesRef = collection(db, COLLECTIONS.MESSAGES);
+      console.log('[getMessagesByConversation] Fetching messages for conversation:', conversationId);
+      const messagesPath = `conversations/${conversationId}/messages`;
+      console.log('[getMessagesByConversation] Using Firestore path:', messagesPath);
+
+      const messagesRef = collection(db, messagesPath);
       const q = query(
         messagesRef,
-        where('conversation_id', '==', conversationId),
         orderBy('created_at', 'asc')
       );
+
       const querySnapshot = await getDocs(q);
-      
+      console.log('[getMessagesByConversation] Query returned', querySnapshot.size, 'messages');
+
       const messages: Message[] = [];
       querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
         messages.push({
           id: doc.id,
+          conversation_id: conversationId, // Ensure conversation_id is set
           ...doc.data()
         } as Message);
       });
-      
+
       return { data: messages, error: null };
     } catch (error: any) {
-      console.error('Error getting messages:', error);
+      console.error('[getMessagesByConversation] Error getting messages:', error);
       return { data: null, error: error.message };
     }
   },
@@ -164,11 +186,14 @@ export const messageHelpers = {
   // Add new message
   async addMessage(messageData: Omit<Message, 'id' | 'created_at'>): Promise<FirestoreResponse<Message>> {
     try {
-      const messagesRef = collection(db, COLLECTIONS.MESSAGES);
+      console.log('[addMessage] Adding message to conversation:', messageData.conversation_id);
+      const messagesPath = `conversations/${messageData.conversation_id}/messages`;
+      console.log('[addMessage] Using Firestore path:', messagesPath);
+
+      const messagesRef = collection(db, messagesPath);
 
       // Clean the data - remove undefined values and only include defined fields
       const cleanMessageData: any = {
-        conversation_id: messageData.conversation_id,
         sender_id: messageData.sender_id,
         content: messageData.content,
         message_type: messageData.message_type || 'text',
@@ -226,6 +251,7 @@ export const messageHelpers = {
       }
 
       const docRef = await addDoc(messagesRef, cleanMessageData);
+      console.log('[addMessage] Created message document:', docRef.id);
 
       // Update conversation last message time (fire and forget for better performance)
       conversationHelpers.updateConversationLastMessage(messageData.conversation_id).catch(error => {
@@ -235,41 +261,50 @@ export const messageHelpers = {
       return {
         data: {
           id: docRef.id,
+          conversation_id: messageData.conversation_id,
           ...cleanMessageData,
           created_at: new Date() // Temporary client-side timestamp for immediate display
         } as Message,
         error: null
       };
     } catch (error: any) {
-      console.error('Error adding message:', error);
+      console.error('[addMessage] Error adding message:', error);
       return { data: null, error: error.message };
     }
   },
 
   // Mark message as read
-  async markMessageAsRead(messageId: string): Promise<FirestoreResponse<Message>> {
+  async markMessageAsRead(conversationId: string, messageId: string): Promise<FirestoreResponse<Message>> {
     try {
-      const messageRef = doc(db, COLLECTIONS.MESSAGES, messageId);
+      console.log('[markMessageAsRead] Marking message as read:', { conversationId, messageId });
+      const messagePath = `conversations/${conversationId}/messages/${messageId}`;
+      console.log('[markMessageAsRead] Using Firestore path:', messagePath);
+
+      const messageRef = doc(db, messagePath);
       await updateDoc(messageRef, {
         is_read: true
       });
-      
+
       return { data: { id: messageId, is_read: true } as Message, error: null };
     } catch (error: any) {
-      console.error('Error marking message as read:', error);
+      console.error('[markMessageAsRead] Error marking message as read:', error);
       return { data: null, error: error.message };
     }
   },
 
   // Delete message
-  async deleteMessage(messageId: string): Promise<FirestoreResponse<{ id: string }>> {
+  async deleteMessage(conversationId: string, messageId: string): Promise<FirestoreResponse<{ id: string }>> {
     try {
-      const messageRef = doc(db, COLLECTIONS.MESSAGES, messageId);
+      console.log('[deleteMessage] Deleting message:', { conversationId, messageId });
+      const messagePath = `conversations/${conversationId}/messages/${messageId}`;
+      console.log('[deleteMessage] Using Firestore path:', messagePath);
+
+      const messageRef = doc(db, messagePath);
       await deleteDoc(messageRef);
-      
+
       return { data: { id: messageId }, error: null };
     } catch (error: any) {
-      console.error('Error deleting message:', error);
+      console.error('[deleteMessage] Error deleting message:', error);
       return { data: null, error: error.message };
     }
   },

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { propertyHelpers } from '../services/firebase/firebaseHelpers';
+import { useAuth } from './useAuth';
 
 export const useProperties = () => {
+  const { user } = useAuth();
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -10,14 +12,31 @@ export const useProperties = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const result = await propertyHelpers.searchProperties(filters);
-      
+
+      let result;
+
+      // Role-based filtering
+      if (user?.role === 'owner') {
+        console.log('[useProperties JS] OWNER MODE - currentUser.uid:', user.uid);
+        console.log('[useProperties JS] OWNER MODE - user.role:', user.role);
+        console.log('[useProperties JS] OWNER MODE - Firestore query: getPropertiesByOwner with ownerId =', user.uid);
+        result = await propertyHelpers.getPropertiesByOwner(user.uid);
+        console.log('[useProperties JS] OWNER MODE - Query result:', result?.data?.length || 0, 'properties found');
+      } else {
+        // Apply filters for tenants, defaulting to available properties
+        const searchFilters = { ...filters, status: 'available' };
+        console.log('[useProperties JS] TENANT MODE - currentUser.uid:', user?.uid);
+        console.log('[useProperties JS] TENANT MODE - user.role:', user?.role);
+        console.log('[useProperties JS] TENANT MODE - Firestore query: searchProperties with filters:', searchFilters);
+        result = await propertyHelpers.searchProperties(searchFilters);
+        console.log('[useProperties JS] TENANT MODE - Query result:', result?.data?.length || 0, 'properties found');
+      }
+
       if (result.error) {
         setError(result.error);
         return { success: false, error: result.error };
       }
-      
+
       setProperties(result.data);
       return { success: true, data: result.data };
     } catch (error) {

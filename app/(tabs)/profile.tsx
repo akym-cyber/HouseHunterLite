@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   Image,
+  Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Text,
   Card,
@@ -25,6 +27,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useUserProfile } from '../../src/hooks/useUserProfile';
 import { defaultTheme } from '../../src/styles/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
@@ -128,6 +131,60 @@ export default function ProfileScreen() {
         },
       ]
     );
+  };
+
+  const handleForceLogout = async () => {
+    try {
+      console.log('[Profile] Starting force logout for account switching');
+
+      // 1. Call the existing signOut() to log the user out
+      const signOutResult = await signOut();
+      if (!signOutResult.success) {
+        throw new Error(signOutResult.error || 'Failed to sign out');
+      }
+
+      // 2. Clear any persisted auth/session data
+      // On web: localStorage / sessionStorage related to Firebase or auth
+      if (Platform.OS === 'web') {
+        // Clear Firebase Auth persistence
+        try {
+          localStorage.removeItem('firebase:authUser');
+          localStorage.removeItem('firebaseLocalStorageDb');
+          sessionStorage.clear();
+          console.log('[Profile] Cleared web storage (localStorage/sessionStorage)');
+        } catch (error) {
+          console.warn('[Profile] Error clearing web storage:', error);
+        }
+      } else {
+        // On React Native: AsyncStorage keys used for auth persistence
+        try {
+          await AsyncStorage.multiRemove([
+            'firebase:authUser',
+            'firebaseLocalStorageDb',
+            'dev_force_logout_done'
+          ]);
+          console.log('[Profile] Cleared AsyncStorage auth data');
+        } catch (error) {
+          console.warn('[Profile] Error clearing AsyncStorage:', error);
+        }
+      }
+
+      // 3. Reset any in-memory user state or global context related to the previous user
+      // The useAuth hook will handle resetting the user state when auth state changes
+
+      // 4. Only after everything is cleared, navigate to the login screen
+      console.log('[Profile] Force logout complete, navigating to login');
+      showSnackbar('Logged out - choose your account');
+
+      // Navigate to login screen after a brief delay to allow snackbar to show
+      setTimeout(() => {
+        router.replace('/(auth)/login');
+      }, 1000);
+
+    } catch (error) {
+      console.error('[Profile] Force logout failed:', error);
+      showSnackbar(error instanceof Error ? error.message : 'Failed to logout completely', true);
+    }
   };
 
   const handleEditProfile = () => {
@@ -343,19 +400,20 @@ export default function ProfileScreen() {
       </View>
 
       {/* Scrollable Content */}
-      <ScrollView 
-        style={styles.scrollView} 
-        contentContainerStyle={styles.scrollContent} 
-        showsVerticalScrollIndicator={true}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={defaultTheme.colors.primary}
-            colors={[defaultTheme.colors.primary]}
-          />
-        }
-      >
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView 
+          style={styles.scrollView} 
+          contentContainerStyle={styles.scrollContent} 
+          showsVerticalScrollIndicator={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={defaultTheme.colors.primary}
+              colors={[defaultTheme.colors.primary]}
+            />
+          }
+        >
         {/* Profile Actions */}
         <Card style={styles.card}>
           <Card.Content>
@@ -467,9 +525,18 @@ export default function ProfileScreen() {
           </Card.Content>
         </Card>
 
-        {/* Sign Out */}
+        {/* Account Actions */}
         <Card style={styles.card}>
           <Card.Content>
+            <Title style={styles.sectionTitle}>Account Actions</Title>
+            <Button
+              mode="outlined"
+              onPress={handleForceLogout}
+              icon="account-switch"
+              style={styles.actionButton}
+            >
+              Switch Account
+            </Button>
             <Button
               mode="contained"
               onPress={handleSignOut}
@@ -501,6 +568,7 @@ export default function ProfileScreen() {
       >
         <Text style={snackbarError ? styles.snackbarErrorText : undefined}>{snackbarMessage}</Text>
       </Snackbar>
+     </SafeAreaView>
     </View>
   );
 }
@@ -607,11 +675,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
+    paddingTop: 16,
     paddingBottom: 40,
   },
   card: {
     margin: 20,
-    marginTop: 10,
+    marginTop: 0,
     elevation: 2,
     borderRadius: 8,
   },
@@ -642,5 +711,8 @@ const styles = StyleSheet.create({
   },
   snackbarErrorText: {
     color: defaultTheme.colors.error,
+  },
+  content: {
+    flex: 1,
   },
 });

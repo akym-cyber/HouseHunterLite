@@ -22,7 +22,7 @@ export default function ChatLayout() {
         name="[id]"
         options={{
           title: 'Chat',
-          headerLeft: () => null, // Let the ChatRoom component handle its own header
+          headerShown: false,
         }}
       />
     </Stack>

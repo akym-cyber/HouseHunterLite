@@ -1,74 +1,39 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   Alert,
   Clipboard,
-  ActivityIndicator,
-  Image,
-  Dimensions,
-  StatusBar,
   Keyboard,
-  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
   Animated,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { FlatList } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Text,
-  TextInput,
-  Button,
-  Card,
   Avatar,
   IconButton,
-  Divider,
-  FAB,
-  Chip,
-  Banner,
-  ProgressBar,
-  Modal,
-  Portal,
-  Searchbar,
+  ActivityIndicator,
 } from 'react-native-paper';
-// import * as Haptics from 'expo-haptics'; // Optional: install expo-haptics for haptic feedback
 import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
-// import { Audio } from 'expo-av';
-// import * as FileSystem from 'expo-file-system';
-// import * as ImagePicker from 'expo-image-picker';
-// import * as DocumentPicker from 'expo-document-picker';
-// import * as FileSystem from 'expo-file-system';
-// import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from '../../hooks/useAuth';
-import useKeyboardVisibility from '../../hooks/useKeyboardVisibility';
 import { defaultTheme } from '../../styles/theme';
-
-import { getBubbleStyle } from '../../utils/bubbleShapes';
-import { Message, Conversation, SearchFilter, Property } from '../../types/database';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, orderBy, limit } from 'firebase/firestore';
-import { db } from '../../services/firebase/firebaseConfig';
-
-// Property-specific chat enhancements
-import PropertyContextSidebar from './PropertyContextSidebar';
-import PaymentIntegration from './PaymentIntegration';
-import PropertyBot from './PropertyBot';
+import { Message, Conversation, Property } from '../../types/database';
 import ChatBubble from './ChatBubble';
 import DateSeparator from './DateSeparator';
-import TypingIndicator from './TypingIndicator';
-import ReactionButton from './ReactionButton';
-import NewMessageHint from './NewMessageHint';
-import ReactionHistoryPopup from './ReactionHistoryPopup';
-import FloatingReaction from './FloatingReaction';
-import MessageHighlight from './MessageHighlight';
-import ReactionReplay from './ReactionReplay';
-import MessageEmotionPulse from './MessageEmotionPulse';
-import FloatingQuickReply from './FloatingQuickReply';
-import MessageBreathing from './MessageBreathing';
 import ChatInputBar from './ChatInputBar';
+
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 interface ChatRoomProps {
   conversation: Conversation;
@@ -76,6 +41,7 @@ interface ChatRoomProps {
   onSendMessage: (content: string, replyTo?: string, media?: any[]) => Promise<void>;
   onLoadMore: () => Promise<void>;
   loading?: boolean;
+  onBack?: () => void;
   otherUser?: {
     id: string;
     firstName: string;
@@ -84,7 +50,13 @@ interface ChatRoomProps {
     isOnline?: boolean;
     lastSeen?: string;
   };
+  property?: Property;
 }
+
+const SCROLL_THRESHOLD = 100;
+const MESSAGE_HEIGHT_ESTIMATE = 60;
+const HEADER_HEIGHT = 60; // Approximate header height
+const INPUT_BAR_HEIGHT = 50; // Approximate input bar height
 
 function ChatRoom({
   conversation,
@@ -92,26 +64,34 @@ function ChatRoom({
   onSendMessage,
   onLoadMore,
   loading = false,
+  onBack,
   otherUser,
-  property, // Add property prop
-}: ChatRoomProps & { property?: Property }) {
+  property,
+}: ChatRoomProps) {
   const { user } = useAuth();
-  const isKeyboardVisible = useKeyboardVisibility();
+  const insets = useSafeAreaInsets();
+  const flatListRef = useRef<FlatList<Message>>(null);
+  const scrollPositionRef = useRef({ offset: 0, contentHeight: 0, layoutHeight: 0 });
+  const isUserScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-
-  const [longPressingMessageId, setLongPressingMessageId] = useState<string | null>(null);
-  const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isInputFocused, setIsInputFocused] = useState(false);
- const flatListRef = useRef<FlatList<Message>>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Video call pulse animation
   const videoCallPulseAnim = useRef(new Animated.Value(0)).current;
 
-  // Start video call pulse animation
+  // Calculate keyboard vertical offset - only header height
+  // KeyboardAvoidingView automatically accounts for safe area, so we only need header
+  const keyboardVerticalOffset = useMemo(() => {
+    return HEADER_HEIGHT; // Just the header, KeyboardAvoidingView handles safe area
+  }, []);
+
+  // Initialize pulse animation
   useEffect(() => {
     const pulseAnimation = Animated.loop(
       Animated.sequence([
@@ -128,35 +108,66 @@ function ChatRoom({
       ])
     );
     pulseAnimation.start();
-
     return () => {
       pulseAnimation.stop();
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
     };
   }, [videoCallPulseAnim]);
 
-  // Centralized scroll function to prevent layout thrashing and Reanimated issues
-  const scrollToBottom = useCallback(() => {
-    flatListRef.current?.scrollToEnd({ animated: true });
+  // Smart scroll to bottom
+  const scrollToBottom = useCallback((animated = true, force = false) => {
+    if (!flatListRef.current) return;
+    if (force || isNearBottom) {
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated });
+      });
+    }
+  }, [isNearBottom]);
+
+  // Track scroll position
+  const handleScroll = useCallback((event: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    
+    scrollPositionRef.current = {
+      offset: contentOffset.y,
+      contentHeight: contentSize.height,
+      layoutHeight: layoutMeasurement.height,
+    };
+
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    const nowNearBottom = distanceFromBottom < SCROLL_THRESHOLD;
+    setIsNearBottom(nowNearBottom);
+
+    isUserScrollingRef.current = true;
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
+      isUserScrollingRef.current = false;
+    }, 150);
   }, []);
 
-  // Scroll to bottom when new message arrives
-  useEffect(() => {
-    if (flatListRef.current) {
-      setTimeout(() => {
-        scrollToBottom();
-      }, 100);
-    }
-  }, [messages, scrollToBottom]);
+  const handleScrollBeginDrag = useCallback(() => {
+    isUserScrollingRef.current = true;
+  }, []);
 
-  // Keyboard listeners for smooth animations
+  const handleScrollEndDrag = useCallback(() => {
+    setTimeout(() => {
+      isUserScrollingRef.current = false;
+    }, 500);
+  }, []);
+
+  // Keyboard handling
   useEffect(() => {
     const showSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
-        setTimeout(() => {
-          scrollToBottom();
-        }, 100);
+        if (isNearBottom) {
+          setTimeout(() => scrollToBottom(true, true), 100);
+        }
       }
     );
 
@@ -171,79 +182,69 @@ function ChatRoom({
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [isNearBottom, scrollToBottom]);
 
-  // Track scroll position to show/hide new message hint
-  const [isNearBottom, setIsNearBottom] = useState(true);
-
-  const handleScroll = useCallback((event: any) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const isNearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
-    setIsNearBottom(isNearBottom);
-
-    if (isNearBottom) {
-      // Reset new message count when user scrolls to bottom
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    if (messages.length > 0 && isNearBottom && !isUserScrollingRef.current) {
+      const timeout = setTimeout(() => {
+        scrollToBottom(true, true);
+      }, 50);
+      return () => clearTimeout(timeout);
     }
-  }, []);
+  }, [messages.length, isNearBottom, scrollToBottom]);
 
-  const handleNewMessageHintPress = useCallback(() => {
-    scrollToBottom();
-  }, []);
-
-  const handleTextChange = useCallback((text: string) => {
-    setNewMessage(text);
-  }, []);
-
-  const handleSend = async () => {
-    if (!newMessage.trim()) return;
-
-    const newMessageObj = {
-      id: Date.now().toString(),
-      content: newMessage.trim(),
-      senderId: user?.id || 'propertyOwnerId', // Get from auth
-      created_at: new Date().toISOString(),
-      status: 'sent'
-    };
-
+  // Format timestamp
+  const formatMessageTime = useCallback((timestamp: any): string => {
     try {
-      // Save to database via parent component
-      await onSendMessage(newMessageObj.content, replyingTo?.id);
+      const now = new Date();
+      let messageTime: Date;
 
-      // Update local state immediately for better UX
-      // This will be replaced when real-time updates come in
-      setNewMessage('');
+      if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
+        messageTime = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+      } else if (typeof timestamp === 'string') {
+        messageTime = new Date(timestamp);
+      } else if (typeof timestamp === 'number') {
+        messageTime = new Date(timestamp);
+      } else if (timestamp instanceof Date) {
+        messageTime = timestamp;
+      } else {
+        return 'now';
+      }
 
-      // Scroll to bottom
-      setTimeout(() => {
-        scrollToBottom();
-      }, 100);
+      if (isNaN(messageTime.getTime())) {
+        return 'now';
+      }
 
-      // Clear reply state
-      setReplyingTo(null);
+      const diffInMs = now.getTime() - messageTime.getTime();
+      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+      const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+      const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
 
+      if (diffInMinutes < 1) return 'just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m`;
+      if (diffInHours < 24) return `${diffInHours}h`;
+      if (diffInDays === 1) return 'Yesterday';
+      if (diffInDays < 7) {
+        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        return daysOfWeek[messageTime.getDay()];
+      }
+
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[messageTime.getMonth()];
+      const day = messageTime.getDate();
+
+      if (messageTime.getFullYear() === now.getFullYear()) {
+        return `${month} ${day}`;
+      }
+
+      return `${month} ${day}, ${messageTime.getFullYear()}`;
     } catch (error) {
-      console.error('Failed to send message:', error);
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      return 'now';
     }
-  };
+  }, []);
 
-  // Handle retry for failed messages
-  const handleRetry = useCallback(async (messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message) return;
-
-    try {
-      // Retry sending the message
-      await onSendMessage(message.content, undefined); // Don't pass replyTo for retry
-      Alert.alert('Success', 'Message sent successfully!');
-    } catch (error) {
-      console.error('Failed to retry message:', error);
-      Alert.alert('Error', 'Failed to send message. Please try again.');
-    }
-  }, [messages, onSendMessage]);
-
-  // Message status indicators
-  const getMessageStatusIcon = (status?: string) => {
+  const getMessageStatusIcon = useCallback((status?: string): string | null => {
     switch (status) {
       case 'sending': return '⏳';
       case 'sent': return '✓';
@@ -252,110 +253,22 @@ function ChatRoom({
       case 'failed': return '❌';
       default: return '✓';
     }
-  };
-
-  // Format timestamp - Telegram style with relative time
-  const formatMessageTime = useCallback((timestamp: any) => {
-    try {
-      const now = new Date();
-      let messageTime: Date;
-
-      if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
-        messageTime = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
-      } else if (typeof timestamp === 'string') {
-        if (timestamp.includes('T')) {
-          messageTime = new Date(timestamp);
-        } else if (timestamp.match(/^\d+$/)) {
-          messageTime = new Date(parseInt(timestamp));
-        } else {
-          messageTime = new Date(timestamp);
-        }
-      } else if (typeof timestamp === 'number') {
-        messageTime = new Date(timestamp);
-      } else if (timestamp instanceof Date) {
-        messageTime = timestamp;
-      } else {
-        messageTime = new Date(timestamp);
-      }
-
-      if (isNaN(messageTime.getTime())) {
-        return 'now';
-      }
-
-      const diffInMs = now.getTime() - messageTime.getTime();
-
-      // Difference in minutes, hours, days
-      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
-      const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
-      const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-      // Less than 1 minute ago
-      if (diffInMinutes < 1) {
-        return 'just now';
-      }
-
-      // Less than 1 hour ago
-      if (diffInMinutes < 60) {
-        return `${diffInMinutes}m`;
-      }
-
-      // Less than 24 hours ago
-      if (diffInHours < 24) {
-        return `${diffInHours}h`;
-      }
-
-      // Yesterday (24-48 hours ago)
-      if (diffInDays === 1) {
-        return 'Yesterday';
-      }
-
-      // Less than 7 days ago
-      if (diffInDays < 7) {
-        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        return daysOfWeek[messageTime.getDay()];
-      }
-
-      // Older than 7 days - show date (like "Oct 11")
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const month = months[messageTime.getMonth()];
-      const day = messageTime.getDate();
-
-      // If same year, show "Oct 11"
-      if (messageTime.getFullYear() === now.getFullYear()) {
-        return `${month} ${day}`;
-      }
-
-      // Different year, show "Oct 11, 2023"
-      return `${month} ${day}, ${messageTime.getFullYear()}`;
-    } catch (error) {
-      console.warn('Error formatting timestamp:', timestamp, error);
-      return 'now';
-    }
   }, []);
 
-  // Helper function to convert timestamp to Date
   const timestampToDate = useCallback((timestamp: any): Date => {
     if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
       return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
     } else if (typeof timestamp === 'string') {
-      if (timestamp.includes('T')) {
-        return new Date(timestamp);
-      } else if (timestamp.match(/^\d+$/)) {
-        return new Date(parseInt(timestamp));
-      } else {
-        return new Date(timestamp);
-      }
+      return new Date(timestamp);
     } else if (typeof timestamp === 'number') {
       return new Date(timestamp);
     } else if (timestamp instanceof Date) {
       return timestamp;
-    } else {
-      return new Date(timestamp);
     }
+    return new Date();
   }, []);
 
-  // Date separators
-  const getDateSeparator = useCallback((messages: Message[], index: number) => {
+  const getDateSeparator = useCallback((messages: Message[], index: number): string | null => {
     if (index === 0) return null;
 
     const currentMessage = messages[index];
@@ -386,15 +299,13 @@ function ChatRoom({
     return null;
   }, [timestampToDate]);
 
-  // Helper function to check if messages are consecutive from same sender
-  const isConsecutiveFromSameSender = useCallback((currentIndex: number) => {
+  const isConsecutiveFromSameSender = useCallback((currentIndex: number): boolean => {
     if (currentIndex === 0) return false;
 
     const currentMessage = messages[currentIndex];
     const previousMessage = messages[currentIndex - 1];
 
     const sameSender = currentMessage.sender_id === previousMessage.sender_id;
-
     const currentTime = timestampToDate(currentMessage.created_at);
     const previousTime = timestampToDate(previousMessage.created_at);
     const timeDiff = currentTime.getTime() - previousTime.getTime();
@@ -403,8 +314,35 @@ function ChatRoom({
     return sameSender && withinTimeWindow;
   }, [messages, timestampToDate]);
 
-  const renderMessage = useMemo(() => ({ item, index }: { item: Message; index: number }) => {
-    const isOwnMessage = item.sender_id === user?.id;
+  const handleRetry = useCallback(async (messageId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (!message) return;
+
+    try {
+      await onSendMessage(message.content, undefined);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to resend message. Please try again.');
+    }
+  }, [messages, onSendMessage]);
+
+  const handleMessageLongPress = useCallback((message: Message) => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
+    Alert.alert(
+      'Message Options',
+      'Choose an action',
+      [
+        { text: 'Copy', onPress: () => Clipboard.setString(message.content) },
+        { text: 'Reply', onPress: () => setReplyingTo(message) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  }, []);
+
+  const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
+    const isOwnMessage = item.sender_id === user?.uid;
     const dateSeparator = getDateSeparator(messages, index);
     const isConsecutive = isConsecutiveFromSameSender(index);
 
@@ -418,14 +356,11 @@ function ChatRoom({
           style={[
             styles.messageContainer,
             isOwnMessage ? styles.ownMessage : styles.otherMessage,
-            isConsecutive && styles.consecutiveMessage
+            isConsecutive && styles.consecutiveMessage,
           ]}
           onLongPress={() => handleMessageLongPress(item)}
           delayLongPress={500}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          onPressIn={() => setLongPressingMessageId(item.id)}
-          onPressOut={() => setLongPressingMessageId(null)}
-          disabled={isKeyboardVisible}
           activeOpacity={0.9}
         >
           {!isOwnMessage && !isConsecutive && (
@@ -443,71 +378,128 @@ function ChatRoom({
               </View>
             )}
 
-            <MessageBreathing
-              reactions={item.reactions || {}}
-              replyCount={0}
-            >
-              <MessageEmotionPulse reactions={item.reactions || {}}>
-                <ChatBubble
-                  message={item}
-                  isOwnMessage={isOwnMessage}
-                  formatMessageTime={formatMessageTime}
-                  getMessageStatusIcon={getMessageStatusIcon}
-                  isSending={item.status === 'sending'}
-                  onRetry={handleRetry}
-                />
-              </MessageEmotionPulse>
-            </MessageBreathing>
-
-            {item.reactions && Object.keys(item.reactions).length > 0 && (
-              <View style={styles.reactionsContainer}>
-                {Object.entries(item.reactions).map(([emoji, userIds]) => (
-                  <ReactionButton
-                    key={emoji}
-                    emoji={emoji}
-                    count={userIds.length}
-                    messageId={item.id}
-                  />
-                ))}
-              </View>
-            )}
+            <ChatBubble
+              message={item}
+              isOwnMessage={isOwnMessage}
+              formatMessageTime={formatMessageTime}
+              getMessageStatusIcon={getMessageStatusIcon}
+              isSending={item.status === 'sending'}
+              onRetry={handleRetry}
+              otherUserAvatar={otherUser?.avatarUrl}
+            />
           </View>
         </TouchableOpacity>
       </>
     );
-  }, [messages, user?.id, otherUser, formatMessageTime, getDateSeparator, isKeyboardVisible, longPressingMessageId, isConsecutiveFromSameSender, handleRetry]);
+  }, [
+    messages,
+    user?.uid,
+    otherUser,
+    formatMessageTime,
+    getMessageStatusIcon,
+    getDateSeparator,
+    isConsecutiveFromSameSender,
+    handleRetry,
+    handleMessageLongPress,
+  ]);
 
-  const handleMessageLongPress = useCallback((message: Message, event?: any) => {
-    if (hapticsEnabled && Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const getItemLayout = useCallback(
+    (_: any, index: number) => ({
+      length: MESSAGE_HEIGHT_ESTIMATE,
+      offset: MESSAGE_HEIGHT_ESTIMATE * index,
+      index,
+    }),
+    []
+  );
+
+  const keyExtractor = useCallback((item: Message) => item.id, []);
+
+  const handleSend = useCallback(async () => {
+    if (!newMessage.trim() || sending) return;
+
+    const messageContent = newMessage.trim();
+    setNewMessage('');
+    setSending(true);
+
+    try {
+      await onSendMessage(messageContent, replyingTo?.id);
+      setReplyingTo(null);
+      setTimeout(() => scrollToBottom(true, true), 100);
+    } catch (error: any) {
+      console.error('Failed to send message:', error);
+      
+      const errorMessage = error?.message || '';
+      if (errorMessage.includes('permission') || errorMessage.includes('Permission')) {
+        Alert.alert(
+          'Permission Error',
+          'You do not have permission to send messages in this conversation. Please contact support.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', errorMessage || 'Failed to send message. Please try again.');
+      }
+      
+      setNewMessage(messageContent);
+    } finally {
+      setSending(false);
     }
+  }, [newMessage, sending, replyingTo, onSendMessage, scrollToBottom]);
 
-    const position = event?.nativeEvent
-      ? {
-          x: event.nativeEvent.pageX || 0,
-          y: event.nativeEvent.pageY || 0,
-          width: 0,
-          height: 0,
-        }
-      : { x: 100, y: 200, width: 0, height: 0 };
+  const handleSendMedia = useCallback(async (media: any[], messageType: Message['message_type']) => {
+    if (sending || !media || media.length === 0) return;
 
-    // For now, just show a simple alert
-    Alert.alert(
-      'Message Options',
-      'Choose an action',
-      [
-        { text: 'Copy', onPress: () => Clipboard.setString(message.content) },
-        { text: 'Reply', onPress: () => setReplyingTo(message) },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  }, [hapticsEnabled]);
+    setSending(true);
+    try {
+      await onSendMessage('', replyingTo?.id, media);
+      setReplyingTo(null);
+      setTimeout(() => scrollToBottom(true, true), 100);
+    } catch (error: any) {
+      console.error('Failed to send media:', error);
+      Alert.alert('Error', error?.message || 'Failed to send media. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  }, [sending, replyingTo, onSendMessage, scrollToBottom]);
 
-  const renderHeader = () => {
+  const handleSendVoice = useCallback(async (voiceData: { uri: string; duration: number; waveform: number[] }) => {
+    if (sending) return;
+
+    setSending(true);
+    try {
+      const media = [{
+        id: Date.now().toString(),
+        type: 'audio',
+        url: voiceData.uri,
+        duration: voiceData.duration,
+        waveform: voiceData.waveform,
+      }];
+      await onSendMessage('', replyingTo?.id, media);
+      setReplyingTo(null);
+      setTimeout(() => scrollToBottom(true, true), 100);
+    } catch (error: any) {
+      console.error('Failed to send voice message:', error);
+      Alert.alert('Error', error?.message || 'Failed to send voice message. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  }, [sending, replyingTo, onSendMessage, scrollToBottom]);
+
+  const handleInputFocus = useCallback(() => {
+    setIsInputFocused(true);
+    if (isNearBottom) {
+      setTimeout(() => scrollToBottom(true, true), 200);
+    }
+  }, [isNearBottom, scrollToBottom]);
+
+  const handleInputBlur = useCallback(() => {
+    setIsInputFocused(false);
+  }, []);
+
+  const renderHeader = useCallback(() => {
     const handlePhoneCall = async () => {
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        const phoneNumber = '+254794252032'; // Replace with actual contact number
+        const phoneNumber = '+254794252032';
 
         Alert.alert(
           'Make Phone Call',
@@ -540,129 +532,209 @@ function ChatRoom({
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         Alert.alert('Coming Soon', 'Video call feature will be available soon!');
-        // Future video call integration
       } catch (error) {
         console.error('Video call error:', error);
       }
     };
 
+    const displayName = otherUser ? `${otherUser.firstName} ${otherUser.lastName}` : 'Property Owner';
+    const initial = (otherUser?.firstName?.[0] || 'P').toUpperCase();
+
     return (
-      <Card style={styles.headerCard}>
-        <Card.Content style={styles.headerContent}>
+      <View style={[styles.chatHeader, { paddingTop: insets.top + 20 }]}>
+        {onBack && (
+          <IconButton
+            icon="chevron-left"
+            iconColor={defaultTheme.colors.onPrimary}
+            size={28}
+            onPress={onBack}
+            style={styles.headerBackButton}
+          />
+        )}
+        {otherUser?.avatarUrl ? (
           <Avatar.Image
             size={40}
-            source={{ uri: otherUser?.avatarUrl }}
+            source={{ uri: otherUser.avatarUrl }}
             style={styles.headerAvatar}
           />
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerName}>
-              {otherUser ? `${otherUser.firstName} ${otherUser.lastName}` : 'Property Owner'}
-            </Text>
-            <Text style={styles.headerStatus}>
-              {otherUser?.isOnline ? 'Online' : otherUser?.lastSeen ? `Last seen ${formatMessageTime(otherUser.lastSeen)}` : 'Offline'}
-            </Text>
-          </View>
-          <View style={styles.headerIcons}>
-            <TouchableOpacity
-              style={styles.headerIcon}
-              onPress={handlePhoneCall}
-            >
-              <Ionicons name="call-outline" size={24} color={defaultTheme.colors.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIcon}
-              onPress={handleVideoCall}
-            >
-              <Animated.View style={{
-                transform: [{
-                  scale: videoCallPulseAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 1.1],
-                  }),
-                }],
-                opacity: videoCallPulseAnim.interpolate({
+        ) : (
+          <Avatar.Text
+            size={40}
+            label={initial}
+            style={[styles.headerAvatar, styles.headerAvatarText]}
+            labelStyle={{ color: defaultTheme.colors.primary }}
+          />
+        )}
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
+          <Text style={styles.headerStatus} numberOfLines={1}>
+            {otherUser?.isOnline ? 'Online' : otherUser?.lastSeen ? `Last seen ${formatMessageTime(otherUser.lastSeen)}` : 'Offline'}
+          </Text>
+        </View>
+        <View style={styles.headerIcons}>
+          <TouchableOpacity style={styles.headerIcon} onPress={handlePhoneCall}>
+            <Ionicons name="call-outline" size={22} color={defaultTheme.colors.onPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIcon} onPress={handleVideoCall}>
+            <Animated.View style={{
+              transform: [{
+                scale: videoCallPulseAnim.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [0.7, 1],
+                  outputRange: [1, 1.1],
                 }),
-              }}>
-                <Ionicons name="videocam-outline" size={24} color={defaultTheme.colors.primary} />
-              </Animated.View>
-            </TouchableOpacity>
-          </View>
-        </Card.Content>
-      </Card>
+              }],
+              opacity: videoCallPulseAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.7, 1],
+              }),
+            }}>
+              <Ionicons name="videocam-outline" size={22} color={defaultTheme.colors.onPrimary} />
+            </Animated.View>
+          </TouchableOpacity>
+        </View>
+      </View>
     );
-  };
+  }, [onBack, otherUser, formatMessageTime, videoCallPulseAnim, insets.top]);
+
+  // Loading state
+  if (loading && messages.length === 0) {
+    return (
+      <View style={styles.chatContainer}>
+        {renderHeader()}
+        <SafeAreaView style={styles.chatSafeArea} edges={[]}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <Text style={styles.loadingText}>Loading messages...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // Calculate content padding - adjust based on keyboard state
+  const contentPaddingBottom = useMemo(() => {
+    // When keyboard is open: minimal spacing (input sits right above keyboard)
+    // When keyboard is closed: normal spacing (input at bottom)
+    if (keyboardHeight > 0) {
+      // Keyboard open - minimal spacing between input and keyboard
+      return 60; // Just enough for input bar + small buffer
+    } else {
+      // Keyboard closed - normal spacing at bottom
+      return 80; // More space when keyboard is closed
+    }
+  }, [keyboardHeight]);
 
   return (
-    <SafeAreaView style={{flex: 1}}>
+    <View style={styles.chatContainer}>
       {renderHeader()}
-      <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ flexGrow: 1, paddingBottom: keyboardHeight + 80 }}
-          onContentSizeChange={scrollToBottom}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        />
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+      >
+        <SafeAreaView style={styles.chatSafeArea} edges={[]}>
+          <View style={styles.contentWrapper}>
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={keyExtractor}
+              getItemLayout={getItemLayout}
+              contentContainerStyle={[
+                styles.messagesContent,
+                { 
+                  paddingBottom: contentPaddingBottom,
+                  flexGrow: 1,
+                }
+              ]}
+              style={styles.messagesList}
+              onScroll={handleScroll}
+              onScrollBeginDrag={handleScrollBeginDrag}
+              onScrollEndDrag={handleScrollEndDrag}
+              onEndReached={onLoadMore}
+              onEndReachedThreshold={0.5}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === 'android'}
+              maxToRenderPerBatch={10}
+              updateCellsBatchingPeriod={50}
+              initialNumToRender={15}
+              windowSize={10}
+              maintainVisibleContentPosition={
+                isNearBottom && messages.length > 0
+                  ? { minIndexForVisible: messages.length - 1 }
+                  : undefined
+              }
+            />
 
-        {/* Clean Chat Input Bar Component */}
-        <ChatInputBar
-          value={newMessage}
-          onChangeText={setNewMessage}
-          onSend={handleSend}
-          isFocused={isInputFocused}
-          onFocus={() => {
-            setIsInputFocused(true);
-            scrollToBottom();
-          }}
-          onBlur={() => setIsInputFocused(false)}
-        />
+            <ChatInputBar
+              value={newMessage}
+              onChangeText={setNewMessage}
+              onSend={handleSend}
+              onSendMedia={handleSendMedia}
+              onSendVoice={handleSendVoice}
+              conversationId={conversation.id}
+              isFocused={isInputFocused}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+            />
+          </View>
+        </SafeAreaView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-const isSmallScreen = screenHeight < 700;
-
 const styles = StyleSheet.create({
-  safeArea: {
+  chatContainer: {
     flex: 1,
     backgroundColor: defaultTheme.colors.background,
   },
   keyboardAvoid: {
     flex: 1,
   },
-  chatContainer: {
+  chatSafeArea: {
     flex: 1,
   },
-  headerCard: {
-    margin: 8,
-    elevation: 2,
+  contentWrapper: {
+    flex: 1,
+    flexDirection: 'column',
   },
-  headerContent: {
+  messagesList: {
+    flex: 1,
+  },
+  chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: defaultTheme.colors.primary,
+  },
+  headerBackButton: {
+    margin: -8,
   },
   headerAvatar: {
     marginRight: 12,
+    backgroundColor: defaultTheme.colors.onPrimary,
+  },
+  headerAvatarText: {
+    backgroundColor: defaultTheme.colors.onPrimary,
   },
   headerInfo: {
     flex: 1,
+    marginRight: 8,
   },
   headerName: {
-    fontSize: isSmallScreen ? 14 : 16,
+    fontSize: 16,
     fontWeight: '600',
+    color: defaultTheme.colors.onPrimary,
   },
   headerStatus: {
-    fontSize: isSmallScreen ? 11 : 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    fontSize: 12,
+    color: defaultTheme.colors.onPrimary,
+    opacity: 0.85,
+    marginTop: 2,
   },
   headerIcons: {
     flexDirection: 'row',
@@ -672,20 +744,17 @@ const styles = StyleSheet.create({
     padding: 8,
     marginLeft: 4,
   },
-  messagesList: {
-    flex: 1,
-  },
   messagesContent: {
-    padding: isSmallScreen ? 12 : 16,
-    paddingBottom: 80,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   messageContainer: {
     flexDirection: 'row',
-    marginBottom: isSmallScreen ? 12 : 16,
+    marginBottom: 4,
     alignItems: 'flex-end',
   },
   consecutiveMessage: {
-    marginTop: isSmallScreen ? 2 : 4,
+    marginTop: 2,
   },
   ownMessage: {
     justifyContent: 'flex-end',
@@ -695,70 +764,7 @@ const styles = StyleSheet.create({
   },
   messageAvatar: {
     marginRight: 8,
-  },
-  messageBubble: {
-    maxWidth: '75%',
-    minWidth: Platform.select({
-      ios: 70,
-      android: 60,
-      default: 50,
-    }),
-    minHeight: 40,
-    padding: isSmallScreen ? 10 : 12,
-    borderRadius: 18,
-  },
-  ownBubble: {
-    backgroundColor: '#007AFF',
-  },
-  otherBubble: {
-    backgroundColor: '#E5E5EA',
-  },
-  messageText: {
-    fontSize: isSmallScreen ? 13 : 14,
-    lineHeight: isSmallScreen ? 18 : 20,
-    flexShrink: 1,
-    flexWrap: 'wrap',
-  },
-  longMessageText: {
-    lineHeight: isSmallScreen ? 22 : 24,
-  },
-  ownText: {
-    color: '#FFFFFF',
-  },
-  otherText: {
-    color: '#000000',
-  },
-  messageTime: {
-    fontSize: isSmallScreen ? 9 : 10,
-    marginTop: 4,
-  },
-  ownTime: {
-    color: defaultTheme.colors.onPrimary,
-    opacity: 0.8,
-  },
-  otherTime: {
-    color: defaultTheme.colors.onSurfaceVariant,
-  },
-  replyContainer: {
-    backgroundColor: defaultTheme.colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: defaultTheme.colors.outline,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  replyContent: {
-    flex: 1,
-  },
-  replyLabel: {
-    fontSize: 12,
-    color: defaultTheme.colors.primary,
-    fontWeight: '600',
-  },
-  replyMessage: {
-    fontSize: 14,
-    color: defaultTheme.colors.onSurface,
-    marginTop: 2,
+    marginBottom: 4,
   },
   replyPreview: {
     backgroundColor: defaultTheme.colors.surfaceVariant,
@@ -772,34 +778,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: defaultTheme.colors.onSurfaceVariant,
   },
-  messageFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4,
   },
-  statusIcon: {
-    fontSize: 12,
-    color: defaultTheme.colors.onPrimary,
-    opacity: 0.8,
-  },
-  reactionsContainer: {
-    flexDirection: 'row',
-    marginTop: 4,
-    flexWrap: 'wrap',
-  },
-  absoluteInput: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  absoluteReply: {
-    position: 'absolute',
-    bottom: 80, // Above the input
-    left: 0,
-    right: 0,
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: defaultTheme.colors.onSurfaceVariant,
   },
 });
 
-export default ChatRoom;  
+export default ChatRoom;

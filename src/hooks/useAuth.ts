@@ -1,3 +1,7 @@
+// CRITICAL: This file enforces user.uid as the SINGLE SOURCE OF TRUTH for user IDs
+// Do NOT add custom id fields or aliases - always use user.uid from FirebaseUser
+// This prevents permission, filtering, and role-based access bugs
+
 import { useState, useEffect } from 'react';
 import {
   signInWithEmailAndPassword,
@@ -15,7 +19,9 @@ import { userHelpers } from '../services/firebase/firebaseHelpers';
 import { User } from '../types/database';
 
 interface AuthUser extends FirebaseUser {
-  id: string;
+  // CRITICAL: This interface EXTENDS FirebaseUser, which provides user.uid
+  // NEVER add a custom 'id' field - always use user.uid for all operations
+  // This prevents permission, filtering, and role-based access bugs
   firstName?: string;
   lastName?: string;
   phone?: string;
@@ -44,24 +50,7 @@ export const useAuth = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // DEV MODE: Force logout on app start for easy testing (only once per app launch)
-    const checkAndForceLogout = async () => {
-      if (__DEV__) {
-        try {
-          const hasForcedLogout = await AsyncStorage.getItem('dev_force_logout_done');
-          if (!hasForcedLogout) {
-            await signOut(auth);
-            console.log("DEV MODE: Forced sign out (first time only)");
-            await AsyncStorage.setItem('dev_force_logout_done', 'true');
-          }
-        } catch (error) {
-          console.error("DEV MODE: Error checking force logout flag:", error);
-        }
-      }
-    };
-
-    checkAndForceLogout();
-
+    // Listen for auth state changes - no forced logout
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Get additional user data from Firestore
@@ -69,13 +58,11 @@ export const useAuth = () => {
         if (userResult.data) {
           setUser({
             ...firebaseUser,
-            id: firebaseUser.uid,
             ...userResult.data
           });
         } else {
           setUser({
-            ...firebaseUser,
-            id: firebaseUser.uid
+            ...firebaseUser
           } as AuthUser);
           if (userResult.error && userResult.error.includes('client is offline')) {
             setError('You are offline. Some features may not be available.');
@@ -104,14 +91,12 @@ export const useAuth = () => {
       if (userResult.data) {
         setUser({
           ...result.user,
-          id: result.user.uid,
           ...userResult.data
         });
       } else if (userResult.error && userResult.error.includes('client is offline')) {
         setError('You are offline. Some features may not be available.');
         setUser({
-          ...result.user,
-          id: result.user.uid
+          ...result.user
         } as AuthUser);
       } else if (userResult.error) {
         setError(userResult.error);
@@ -143,6 +128,7 @@ export const useAuth = () => {
       // Create user profile in Firestore with new format
       const userDoc = doc(db, 'users', result.user.uid);
       await setDoc(userDoc, {
+        uid: result.user.uid, // Explicitly store Firebase Auth UID for clarity
         name: fullName,
         email: result.user.email,
         photoURL: result.user.photoURL || null,
@@ -164,7 +150,6 @@ export const useAuth = () => {
       if (userResult.data) {
         setUser({
           ...result.user,
-          id: result.user.uid,
           ...userResult.data
         });
       }

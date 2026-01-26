@@ -22,6 +22,7 @@ import { useMessages } from '../../src/hooks/useMessages';
 import { useAuth } from '../../src/hooks/useAuth';
 import { defaultTheme } from '../../src/styles/theme';
 import { Conversation } from '../../src/types/database';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Utility function to format timestamps
 const formatTimestamp = (timestamp: string) => {
@@ -58,7 +59,6 @@ export default function MessagesScreen() {
   useEffect(() => {
     console.log('🔍 ===== MESSAGES SCREEN DEBUG =====');
     console.log('🔍 User:', user);
-    console.log('🔍 User ID:', user?.id);
     console.log('🔍 User UID:', user?.uid);
     console.log('🔍 Loading:', loading);
     console.log('🔍 Error:', error);
@@ -85,7 +85,6 @@ export default function MessagesScreen() {
     console.log('🔍 DEBUG - useAuth() user object:', {
       hasUser: !!user,
       user: user,
-      userId: user?.id,
       userEmail: user?.email,
       userUid: user?.uid,
       allKeys: user ? Object.keys(user) : 'no user'
@@ -106,7 +105,7 @@ export default function MessagesScreen() {
   }, []);
 
   useEffect(() => {
-    console.log("📱 Messages Screen - User:", user?.id);
+    console.log("📱 Messages Screen - User:", user?.uid);
     console.log("📱 Conversations count:", conversations?.length || 0);
     console.log("📱 Conversations data:", conversations);
     console.log("📱 Error:", error);
@@ -218,14 +217,16 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Messages</Title>
+          <Title style={styles.headerTitle}>Chats</Title>
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
-          <Text style={styles.loadingText}>
-            Loading conversations...
-          </Text>
-        </View>
+        <SafeAreaView style={styles.content} edges={[]}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <Text style={styles.loadingText}>
+              Loading conversations...
+            </Text>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -235,22 +236,24 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Messages</Title>
+          <Title style={styles.headerTitle}>Chats</Title>
         </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorIcon}>🔐</Text>
-          <Title style={styles.errorTitle}>Authentication Required</Title>
-          <Text style={styles.errorText}>
-            Please sign in to view your messages
-          </Text>
-          <Button
-            mode="contained"
-            onPress={() => router.push('/(auth)/login')}
-            style={styles.retryButton}
-          >
-            Sign In
-          </Button>
-        </View>
+        <SafeAreaView style={styles.content} edges={[]}>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorIcon}>🔐</Text>
+            <Title style={styles.errorTitle}>Authentication Required</Title>
+            <Text style={styles.errorText}>
+              Please sign in to view your messages
+            </Text>
+            <Button
+              mode="contained"
+              onPress={() => router.push('/(auth)/login')}
+              style={styles.retryButton}
+            >
+              Sign In
+            </Button>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -260,40 +263,16 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Messages</Title>
+          <Title style={styles.headerTitle}>Chats</Title>
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
-          <Text style={styles.loadingText}>
-            Checking authentication...
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  // Show error state with retry
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Title style={styles.headerTitle}>Messages</Title>
-        </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorIcon}>⚠️</Text>
-          <Title style={styles.errorTitle}>Something went wrong</Title>
-          <Text style={styles.errorText}>
-            {error}
-          </Text>
-          <Button
-            mode="contained"
-            onPress={onRefresh}
-            style={styles.retryButton}
-            loading={refreshing}
-          >
-            Try Again
-          </Button>
-        </View>
+        <SafeAreaView style={styles.content} edges={[]}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <Text style={styles.loadingText}>
+              Checking authentication...
+            </Text>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -303,7 +282,7 @@ export default function MessagesScreen() {
       {/* Fixed Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <Title style={styles.headerTitle}>Messages</Title>
+          <Title style={styles.headerTitle}>Chats</Title>
           {!isOnline && (
             <View style={styles.offlineIndicator}>
               <Text style={styles.offlineText}>Offline</Text>
@@ -312,29 +291,31 @@ export default function MessagesScreen() {
         </View>
       </View>
 
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Searchbar
-          placeholder="Search conversations..."
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={styles.searchBar}
-          inputStyle={styles.searchInput}
-        />
-      </View>
+      {/* Messages List with Search Bar */}
+      <SafeAreaView style={styles.content} edges={[]}>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Searchbar
+            placeholder="Search conversations..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchBar}
+            inputStyle={styles.searchInput}
+          />
+        </View>
 
-      {/* Messages List */}
-      <FlatList
-        data={filteredConversations}
-        renderItem={renderConversation}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.conversationList, { flexGrow: 1 }]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={searchQuery ? renderEmptySearch : renderEmpty}
-      />
+        <FlatList
+          data={filteredConversations}
+          renderItem={renderConversation}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.conversationList, { flexGrow: 1 }]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListEmptyComponent={searchQuery ? renderEmptySearch : renderEmpty}
+        />
+      </SafeAreaView>
     </View>
   );
 }
@@ -372,6 +353,7 @@ const styles = StyleSheet.create({
   },
   conversationList: {
     padding: 20,
+    paddingTop: 16,
   },
   conversationCard: {
     backgroundColor: defaultTheme.colors.surface,
@@ -480,7 +462,8 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingTop: 16,
+    paddingBottom: 16,
     backgroundColor: defaultTheme.colors.background,
   },
   searchBar: {
@@ -491,5 +474,8 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     fontSize: 16,
+  },
+  content: {
+    flex: 1,
   },
 });

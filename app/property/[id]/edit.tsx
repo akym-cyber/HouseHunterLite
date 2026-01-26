@@ -15,11 +15,12 @@ import {
   HelperText,
   Chip,
   ProgressBar,
+  IconButton,
 } from 'react-native-paper';
 import { useLocalSearchParams, router } from 'expo-router';
+import { defaultTheme } from '../../../src/styles/theme';
 import { useProperties } from '../../../src/hooks/useProperties';
 import { useAuth } from '../../../src/hooks/useAuth';
-import { defaultTheme } from '../../../src/styles/theme';
 import { PROPERTY_TYPES, AMENITIES, VALIDATION_RULES } from '../../../src/utils/constants';
 import { Property, PropertyMedia } from '../../../src/types/database';
 import ImageUpload from '../../../src/components/property/ImageUpload';
@@ -285,7 +286,8 @@ export default function EditPropertyScreen() {
               const result = await deleteProperty(id);
               if (result.success) {
                 Alert.alert('Success', 'Property deleted successfully');
-                router.replace('/(tabs)'); // Navigate to home tab
+                // Navigate back to previous screen (likely home tab showing properties)
+                router.back();
               } else {
                 Alert.alert('Error', result.error || 'Failed to delete property');
               }
@@ -300,23 +302,44 @@ export default function EditPropertyScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text>Loading property...</Text>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <IconButton
+            icon="chevron-left"
+            iconColor={defaultTheme.colors.onPrimary}
+            size={28}
+            onPress={() => router.back()}
+            style={styles.headerBackButton}
+          />
+          <Title style={styles.headerTitle}>Edit Property</Title>
+          <View style={styles.headerSpacer} />
         </View>
-      </SafeAreaView>
+        <SafeAreaView style={styles.content} edges={[]}>
+          <View style={styles.loadingContainer}>
+            <Text>Loading property...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 32 }}>
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title style={styles.sectionTitle}>Edit Property</Title>
-          </Card.Content>
-        </Card>
+    <View style={styles.container}>
+      {/* Fixed Header */}
+      <View style={styles.header}>
+        <IconButton
+          icon="chevron-left"
+          iconColor={defaultTheme.colors.onPrimary}
+          size={28}
+          onPress={() => router.back()}
+          style={styles.headerBackButton}
+        />
+        <Title style={styles.headerTitle}>Edit Property</Title>
+        <View style={styles.headerSpacer} />
+      </View>
 
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <Card style={styles.card}>
           <Card.Content>
             <Title style={styles.sectionTitle}>Basic Information</Title>
@@ -582,13 +605,23 @@ export default function EditPropertyScreen() {
             </Card.Content>
           </Card>
         )}
+      </ScrollView>
 
         <SafeAreaView edges={['bottom']} style={styles.safeAreaContainer}>
-          <View style={styles.buttonContainer}>
+          <View style={styles.actionContainer}>
+            <Button
+              mode="contained"
+              onPress={handleSubmit}
+              style={styles.actionButton}
+              loading={saving}
+              disabled={saving}
+            >
+              {saving ? 'Updating Property...' : 'Update Property'}
+            </Button>
             <Button
               mode="outlined"
               onPress={handleDeleteProperty}
-              style={[styles.deleteButton, styles.button]}
+              style={[styles.actionButton, styles.deleteButton]}
               icon="delete"
               textColor="#d32f2f"
               disabled={isDeleting}
@@ -596,19 +629,10 @@ export default function EditPropertyScreen() {
             >
               {isDeleting ? 'Deleting...' : 'Delete Property'}
             </Button>
-            <Button
-              mode="contained"
-              onPress={handleSubmit}
-              style={[styles.submitButton, styles.button]}
-              loading={saving}
-              disabled={saving}
-            >
-              {saving ? 'Updating Property...' : 'Update Property'}
-            </Button>
           </View>
         </SafeAreaView>
-      </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -616,6 +640,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: defaultTheme.colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 40,
+    backgroundColor: defaultTheme.colors.primary,
+  },
+  headerBackButton: {
+    margin: -8,
+  },
+  headerTitle: {
+    color: defaultTheme.colors.onPrimary,
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 16,
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,
@@ -627,7 +677,7 @@ const styles = StyleSheet.create({
   },
   card: {
     margin: 16,
-    marginTop: 8,
+    marginTop: 0,
     elevation: 2,
     borderRadius: 8,
   },
@@ -663,10 +713,6 @@ const styles = StyleSheet.create({
   amenityChip: {
     marginBottom: 8,
   },
-  submitButton: {
-    paddingVertical: 8,
-    marginHorizontal: 16,
-  },
   progressBar: {
     marginVertical: 8,
   },
@@ -688,15 +734,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: defaultTheme.colors.onSurfaceVariant,
   },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 16,
-    marginHorizontal: 16,
-    marginBottom: 24,
+  actionContainer: {
+    padding: 16,
+    backgroundColor: defaultTheme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: defaultTheme.colors.outline,
   },
-  button: {
-    flex: 1,
+  actionButton: {
+    marginBottom: 8,
   },
   deleteButton: {
     borderColor: defaultTheme.colors.error,

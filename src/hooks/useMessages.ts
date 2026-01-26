@@ -46,64 +46,52 @@ export const useMessages = () => {
       return;
     }
 
-    console.log('🔍 useMessages: Setting up conversation listener for user:', user.id);
+    console.log('🔍 useMessages: Setting up conversation listener for user:', user.uid);
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     const conversationsRef = collection(db, 'conversations');
 
-    // Listen for conversations where user is participant1
-    const q1 = query(
+    // Listen for conversations where user is in participants array
+    const q = query(
       conversationsRef,
-      where('participant1_id', '==', user.id),
+      where('participants', 'array-contains', user.uid),
       orderBy('last_message_at', 'desc')
     );
 
-    // Listen for conversations where user is participant2
-    const q2 = query(
-      conversationsRef,
-      where('participant2_id', '==', user.id),
-      orderBy('last_message_at', 'desc')
-    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log('🔍 useMessages: conversations snapshot received, docs count:', snapshot.docs.length);
 
-    const unsubscribe1 = onSnapshot(q1, (snapshot1) => {
-      console.log('🔍 useMessages: participant1 snapshot received, docs count:', snapshot1.docs.length);
-      const unsubscribe2 = onSnapshot(q2, (snapshot2) => {
-        console.log('🔍 useMessages: participant2 snapshot received, docs count:', snapshot2.docs.length);
+      const conversations = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Conversation));
 
-        const conversations1 = snapshot1.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Conversation));
+      console.log('🔍 useMessages: conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
 
-        const conversations2 = snapshot2.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Conversation));
-
-        console.log('🔍 useMessages: conversations1:', conversations1);
-        console.log('🔍 useMessages: conversations2:', conversations2);
-
-        // Combine and sort conversations
-        const allConversations = [...conversations1, ...conversations2]
-          .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
-
-        console.log('🔍 useMessages: allConversations count:', allConversations.length);
-
-        // Calculate unread count (conversations < 1 hour old)
-        const unread = allConversations.filter(conv =>
-          new Date().getTime() - new Date(conv.last_message_at).getTime() < (1000 * 60 * 60)
-        ).length;
-
-        setUnreadCount(unread);
-        setState(prev => ({
-          ...prev,
-          conversations: allConversations,
-          loading: false,
-          error: null,
-        }));
+      // Validate participants arrays
+      conversations.forEach(conv => {
+        if (!conv.participants || !Array.isArray(conv.participants)) {
+          console.warn('🔍 useMessages: Conversation missing valid participants array:', conv.id, conv.participants);
+        }
       });
 
-      return unsubscribe2;
+      // Sort conversations by last message time
+      conversations.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+
+      console.log('🔍 useMessages: sorted conversations count:', conversations.length);
+
+      // Calculate unread count (conversations < 1 hour old)
+      const unread = conversations.filter(conv =>
+        new Date().getTime() - new Date(conv.last_message_at).getTime() < (1000 * 60 * 60)
+      ).length;
+
+      setUnreadCount(unread);
+      setState(prev => ({
+        ...prev,
+        conversations: conversations,
+        loading: false,
+        error: null,
+      }));
     }, (error) => {
       console.error('🔍 useMessages: Real-time conversations error:', error);
       setState(prev => ({
@@ -113,7 +101,7 @@ export const useMessages = () => {
       }));
     });
 
-    return () => unsubscribe1();
+    return unsubscribe;
   }, [user]);
 
   // Network status monitoring
@@ -137,7 +125,7 @@ export const useMessages = () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
-      const result = await messageHelpers.getConversationsByUser(user!.id);
+      const result = await messageHelpers.getConversationsByUser(user!.uid);
 
       if (result.error) {
         setState(prev => ({
@@ -207,7 +195,7 @@ export const useMessages = () => {
 
       const result = await messageHelpers.addMessage({
         conversation_id: messageData.conversationId,
-        sender_id: user.id,
+        sender_id: user.uid,
         content: messageData.content,
         message_type: messageData.messageType || 'text',
         attachment_url: messageData.attachmentUrl,
@@ -240,8 +228,8 @@ export const useMessages = () => {
 
       const result = await messageHelpers.createConversation({
         property_id: propertyId,
-        participant1_id: user.id,
-        participant2_id: otherUserId,
+        participants: [user.uid, otherUserId],
+        createdBy: user.uid, // Track who created the conversation
         last_message_at: new Date().toISOString(),
       });
 
@@ -271,7 +259,7 @@ export const useMessages = () => {
 
       const result = await messageHelpers.findConversationByPropertyAndParticipants(
         propertyId,
-        user.id,
+        user.uid,
         otherUserId
       );
 
@@ -300,7 +288,7 @@ export const useMessages = () => {
 
       const result = await messageHelpers.addInquiry({
         property_id: inquiryData.propertyId,
-        tenant_id: user.id,
+        tenant_id: user.uid,
         owner_id: inquiryData.ownerId,
         subject: inquiryData.subject,
         message: inquiryData.message,
@@ -319,9 +307,9 @@ export const useMessages = () => {
     }
   };
 
-  const markMessageAsRead = async (messageId: string) => {
+  const markMessageAsRead = async (conversationId: string, messageId: string) => {
     try {
-      const result = await messageHelpers.markMessageAsRead(messageId);
+      const result = await messageHelpers.markMessageAsRead(conversationId, messageId);
 
       if (result.error) {
         return { success: false, error: result.error };

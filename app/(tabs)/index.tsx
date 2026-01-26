@@ -24,6 +24,7 @@ import { useProperties } from '../../src/hooks/useProperties';
 import { defaultTheme } from '../../src/styles/theme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -32,10 +33,15 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [imageKey, setImageKey] = useState(0); // For cache busting
 
-  // Refresh image on screen focus - only when necessary
+  // Debug logging for property ownership issue
+  console.log('OWNER UID:', user?.uid);
+  console.log('FETCHED PROPERTIES:', properties);
+
+  // Refresh properties on screen focus - refetch after property creation
   useFocusEffect(
     useCallback(() => {
-      console.log('[Home] Screen focused');
+      console.log('[Home] Screen focused - refreshing properties');
+      refreshProperties();
       // Removed automatic image key increment to prevent excessive reloads
     }, []) // Remove profile dependency to prevent excessive refreshes
   );
@@ -160,111 +166,115 @@ export default function HomeScreen() {
           />
         )}
       </View>
-      {/* Scrollable Content */}
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
-        {/* Quick Actions */}
-        <Card style={styles.quickActionsCard}>
-          <Card.Content>
-            <Title style={styles.sectionTitle}>{roleContent.title}</Title>
-            <Paragraph style={styles.sectionSubtitle}>
-              {roleContent.subtitle}
-            </Paragraph>
-            <Button
-              mode="contained"
-              onPress={roleContent.actionHandler}
-              style={styles.actionButton}
-              icon="plus"
-            >
-              {roleContent.actionButton}
-            </Button>
-          </Card.Content>
-        </Card>
+      {/* Screen Content */}
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
+          {/* Quick Actions */}
+          <Card style={styles.quickActionsCard}>
+            <Card.Content>
+              <Title style={styles.sectionTitle}>{roleContent.title}</Title>
+              <Paragraph style={styles.sectionSubtitle}>
+                {roleContent.subtitle}
+              </Paragraph>
+              <Button
+                mode="contained"
+                onPress={roleContent.actionHandler}
+                style={styles.actionButton}
+                icon="plus"
+              >
+                {roleContent.actionButton}
+              </Button>
+            </Card.Content>
+          </Card>
 
-        {/* Recent Properties Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title style={styles.sectionTitle}>
-              {profile?.role === 'owner'
-                ? 'Your Properties'
-                : 'Recent Properties'}
-            </Title>
-            <Button
-              mode="text"
-              onPress={() => router.push('/(tabs)/search')}
-              compact
-            >
-              View All
-            </Button>
-          </View>
-
-          {loading ? (
-            <Card style={styles.loadingCard}>
-              <Card.Content>
-                <Paragraph>Loading properties...</Paragraph>
-              </Card.Content>
-            </Card>
-          ) : properties.length > 0 ? (
-            <View style={styles.propertiesGrid}>
-              {properties.slice(0, 6).map(renderPropertyCard)}
-            </View>
-          ) : (
-            <Card style={styles.emptyCard}>
-              <Card.Content style={styles.emptyContent}>
-                <Text style={styles.emptyIcon}>🏠</Text>
-                <Title style={styles.emptyTitle}>No Properties Yet</Title>
-                <Paragraph style={styles.emptyText}>
-                  {profile?.role === 'owner'
-                    ? 'Start by adding your first property listing'
-                    : 'Explore available properties in your area'}
-                </Paragraph>
-                <Button
-                  mode="outlined"
-                  onPress={roleContent.actionHandler}
-                  style={styles.emptyButton}
-                >
-                  {roleContent.actionButton}
-                </Button>
-              </Card.Content>
-            </Card>
-          )}
-        </View>
-
-        {/* Quick Stats */}
-        {profile?.role === 'owner' ? (
+          {/* Recent Properties Section */}
           <View style={styles.section}>
-            <Title style={styles.sectionTitle}>Quick Stats</Title>
-            <View style={styles.statsGrid}>
-              <Card style={styles.statCard}>
-                <Card.Content>
-                  <Text style={styles.statNumber}>
-                    {properties.filter(p => p.status === 'available').length}
-                  </Text>
-                  <Text style={styles.statLabel}>Available</Text>
-                </Card.Content>
-              </Card>
-              <Card style={styles.statCard}>
-                <Card.Content>
-                  <Text style={styles.statNumber}>
-                    {properties.filter(p => p.status === 'rented').length}
-                  </Text>
-                  <Text style={styles.statLabel}>Rented</Text>
-                </Card.Content>
-              </Card>
-              <Card style={styles.statCard}>
-                <Card.Content>
-                  <Text style={styles.statNumber}>{properties.length}</Text>
-                  <Text style={styles.statLabel}>Total</Text>
-                </Card.Content>
-              </Card>
+            <View style={styles.sectionHeader}>
+              <Title style={styles.sectionTitle}>
+                {profile?.role === 'owner'
+                  ? 'Your Properties'
+                  : 'Recent Properties'}
+              </Title>
+              <Button
+                mode="text"
+                onPress={() => router.push('/(tabs)/search')}
+                compact
+              >
+                View All
+              </Button>
             </View>
+
+            {loading ? (
+              <Card style={styles.loadingCard}>
+                <Card.Content>
+                  <Paragraph>Loading properties...</Paragraph>
+                </Card.Content>
+              </Card>
+            ) : properties.length > 0 ? (
+              <View style={styles.propertiesGrid}>
+                {properties.slice(0, 6).map(renderPropertyCard)}
+              </View>
+            ) : (
+              <Card style={styles.emptyCard}>
+                <Card.Content style={styles.emptyContent}>
+                  <Text style={styles.emptyIcon}>🏠</Text>
+                  <Title style={styles.emptyTitle}>No Properties Yet</Title>
+                  <Paragraph style={styles.emptyText}>
+                    {profile?.role === 'owner'
+                      ? 'Start by adding your first property listing'
+                      : 'Explore available properties in your area'}
+                  </Paragraph>
+                  <Button
+                    mode="outlined"
+                    onPress={roleContent.actionHandler}
+                    style={styles.emptyButton}
+                  >
+                    {roleContent.actionButton}
+                  </Button>
+                </Card.Content>
+              </Card>
+            )}
           </View>
-        ) : null}
-      </ScrollView>
-      <FAB
-        icon="magnify"
-        style={styles.fab}
-        onPress={() => router.push('/property/create')}
-      />
+
+          {/* Quick Stats */}
+          {profile?.role === 'owner' ? (
+            <View style={styles.section}>
+              <Title style={styles.sectionTitle}>Quick Stats</Title>
+              <View style={styles.statsGrid}>
+                <Card style={styles.statCard}>
+                  <Card.Content>
+                    <Text style={styles.statNumber}>
+                      {properties.filter(p => p.status === 'available').length}
+                    </Text>
+                    <Text style={styles.statLabel}>Available</Text>
+                  </Card.Content>
+                </Card>
+                <Card style={styles.statCard}>
+                  <Card.Content>
+                    <Text style={styles.statNumber}>
+                      {properties.filter(p => p.status === 'rented').length}
+                    </Text>
+                    <Text style={styles.statLabel}>Rented</Text>
+                  </Card.Content>
+                </Card>
+                <Card style={styles.statCard}>
+                  <Card.Content>
+                    <Text style={styles.statNumber}>{properties.length}</Text>
+                    <Text style={styles.statLabel}>Total</Text>
+                  </Card.Content>
+                </Card>
+              </View>
+            </View>
+          ) : null}
+        </ScrollView>
+        {profile?.role === 'owner' && (
+          <FAB
+            icon="plus"
+            style={styles.fab}
+            onPress={() => router.push('/property/create')}
+          />
+        )}
+      </SafeAreaView>
     </View>
   );
 }
@@ -308,7 +318,7 @@ const styles = StyleSheet.create({
   },
   quickActionsCard: {
     margin: 20,
-    marginTop: -20,
+    marginTop: 0,
     elevation: 4,
     borderRadius: 12,
   },
@@ -426,6 +436,10 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   scrollContent: {
+    paddingTop: 16,
     paddingBottom: 40,
+  },
+  content: {
+    flex: 1,
   },
 });

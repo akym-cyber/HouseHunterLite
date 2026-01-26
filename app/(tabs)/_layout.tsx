@@ -2,7 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { TouchableOpacity } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMessages } from '../../src/hooks/useMessages';
 
 export default function TabsLayout() {
@@ -56,7 +56,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Icon name="home" size={size} color={color} />
+            <MaterialCommunityIcons name="home" size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <CustomTabButton {...props} />
@@ -68,7 +68,7 @@ export default function TabsLayout() {
         options={{
           title: 'Search',
           tabBarIcon: ({ color, size }) => (
-            <Icon name="magnify" size={size} color={color} />
+            <MaterialCommunityIcons name="magnify" size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <CustomTabButton {...props} />
@@ -80,7 +80,7 @@ export default function TabsLayout() {
         options={{
           title: 'Favorites',
           tabBarIcon: ({ color, size }) => (
-            <Icon name="heart" size={size} color={color} />
+            <MaterialCommunityIcons name="heart" size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <CustomTabButton {...props} />
@@ -90,9 +90,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="messages"
         options={{
-          title: 'Messages',
+          title: 'Chats',
           tabBarIcon: ({ color, size }) => (
-            <Icon name="message" size={size} color={color} />
+            <MaterialCommunityIcons name="message" size={size} color={color} />
           ),
           tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
           tabBarButton: (props) => (
@@ -105,7 +105,7 @@ export default function TabsLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => (
-            <Icon name="account" size={size} color={color} />
+            <MaterialCommunityIcons name="account" size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <CustomTabButton {...props} />

@@ -19,6 +19,7 @@ import {
 import { router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
 import { defaultTheme } from '../../src/styles/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { PROPERTY_TYPES, BEDROOM_OPTIONS, PRICE_RANGES, formatPrice } from '../../src/utils/constants';
 import { Property } from '../../src/types/database';
 
@@ -229,43 +230,45 @@ export default function SearchScreen() {
       <View style={styles.header}>
         <Title style={styles.headerTitle}>Search Properties</Title>
       </View>
-      <ScrollView style={styles.scrollView} contentContainerStyle={{paddingBottom: 100}} showsVerticalScrollIndicator={true}>
-        <Searchbar
-          placeholder="Search by location, property type..."
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          onSubmitEditing={handleSearch}
-          style={styles.searchBar}
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
+          <Searchbar
+            placeholder="Search by location, property type..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            onSubmitEditing={handleSearch}
+            style={styles.searchBar}
+          />
+          <View style={styles.filterToggle}>
+            <Button
+              mode="outlined"
+              onPress={() => setShowFilters(!showFilters)}
+              icon={showFilters ? 'chevron-up' : 'chevron-down'}
+            >
+              {showFilters ? 'Hide Filters' : 'Show Filters'}
+            </Button>
+          </View>
+          {showFilters && renderFilters()}
+          <View style={styles.propertyList}>
+            {properties.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyIcon}>🔍</Text>
+                <Title style={styles.emptyTitle}>No Properties Found</Title>
+                <Text style={styles.emptyText}>
+                  Try adjusting your search criteria or filters
+                </Text>
+              </View>
+            ) : (
+              properties.map((item) => renderPropertyCard({ item }))
+            )}
+          </View>
+        </ScrollView>
+        <FAB
+          icon="map"
+          style={styles.fab}
+          onPress={() => router.push('/(tabs)/search')}
         />
-        <View style={styles.filterToggle}>
-          <Button
-            mode="outlined"
-            onPress={() => setShowFilters(!showFilters)}
-            icon={showFilters ? 'chevron-up' : 'chevron-down'}
-          >
-            {showFilters ? 'Hide Filters' : 'Show Filters'}
-          </Button>
-        </View>
-        {showFilters && renderFilters()}
-        <View style={styles.propertyList}>
-          {properties.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>🔍</Text>
-              <Title style={styles.emptyTitle}>No Properties Found</Title>
-              <Text style={styles.emptyText}>
-                Try adjusting your search criteria or filters
-              </Text>
-            </View>
-          ) : (
-            properties.map((item) => renderPropertyCard({ item }))
-          )}
-        </View>
-      </ScrollView>
-      <FAB
-        icon="map"
-        style={styles.fab}
-        onPress={() => router.push('/(tabs)/search')}
-      />
+      </SafeAreaView>
     </View>
   );
 }
@@ -276,6 +279,14 @@ const styles = StyleSheet.create({
     backgroundColor: defaultTheme.colors.background,
   },
   scrollView: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 16,
+    paddingBottom: 100,
   },
   header: {
     padding: 20,
@@ -289,7 +300,7 @@ const styles = StyleSheet.create({
   },
   searchBar: {
     margin: 20,
-    marginTop: -10,
+    marginTop: 0,
     elevation: 4,
   },
   filterToggle: {

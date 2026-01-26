@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
-import { db, auth, checkFirebaseConnection } from '../services/firebase/firebaseConfig';
+import { db, auth } from '../services/firebase/firebaseConfig';
 import { cloudinaryService } from '../services/firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -36,26 +36,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
       try {
         setLoading(true);
         setError(null);
-        
-        // Check connection before attempting Firebase operation
-        const connectionCheck = await checkFirebaseConnection();
-        console.log('[useUserProfile] Firestore connection check:', connectionCheck);
-        if (!connectionCheck.connected) {
-          // Use fallback profile when offline
-          setProfile({
-            uid: firebaseUser.uid,
-            name: firebaseUser.displayName || 'Guest',
-            email: firebaseUser.email || '',
-            photoURL: firebaseUser.photoURL || null,
-            role: 'tenant',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          setError('You are offline. Using cached profile data.');
-          setLoading(false);
-          return;
-        }
-        
+
         const userDoc = doc(db, 'users', firebaseUser.uid);
         const userSnap = await getDoc(userDoc);
         

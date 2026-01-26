@@ -18,12 +18,12 @@ import {
   IconButton,
   FAB,
 } from 'react-native-paper';
+import { defaultTheme } from '../../src/styles/theme';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useFavorites } from '../../src/hooks/useFavorites';
 import { useMessages } from '../../src/hooks/useMessages';
-import { defaultTheme } from '../../src/styles/theme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
 import Video from 'react-native-video';
@@ -69,7 +69,7 @@ export default function PropertyDetailsScreen() {
     if (!property) return;
 
     // Check if user is trying to contact themselves
-    if (user.id === property.ownerId) {
+    if (user.uid === property.ownerId) {
       Alert.alert('Error', 'You cannot contact yourself');
       return;
     }
@@ -124,38 +124,168 @@ export default function PropertyDetailsScreen() {
   };
 
   const handleEditProperty = () => {
-    if (!property) return;
-    router.push(`/property/edit/${property.id}`);
-  };
+    console.log('[PropertyDetail] handleEditProperty called');
+    console.log('[PropertyDetail] Platform.OS:', Platform.OS);
+    console.log('[PropertyDetail] Property loaded:', !!property);
+    console.log('[PropertyDetail] Property ID:', property?.id);
+    console.log('[PropertyDetail] Current route params:', { id });
 
-  const handleDeleteProperty = () => {
-    if (!property) return;
+    if (!property) {
+      console.log('[PropertyDetail] ERROR: No property loaded yet!');
+      Alert.alert('Error', 'Property not loaded yet. Please wait and try again.');
+      return;
+    }
 
-    Alert.alert(
-      'Delete Property',
-      'Are you sure you want to delete this property? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setIsDeleting(true);
-            try {
-              const result = await deleteProperty(property.id);
-              if (result.success) {
-                Alert.alert('Success', 'Property deleted successfully');
-                router.replace('/(tabs)'); // Navigate to home tab
-              } else {
-                Alert.alert('Error', result.error || 'Failed to delete property');
+    if (!property.id) {
+      console.log('[PropertyDetail] ERROR: Property has no ID!');
+      Alert.alert('Error', 'Property ID is missing. Please try again.');
+      return;
+    }
+
+    const editRoute = `/property/${property.id}/edit`;
+    console.log('[PropertyDetail] Constructed route:', editRoute);
+
+    // Validate route format
+    if (!editRoute.includes(property.id)) {
+      console.log('[PropertyDetail] ERROR: Route construction failed!');
+      Alert.alert('Error', 'Route construction failed. Please try again.');
+      return;
+    }
+
+    console.log('[PropertyDetail] Starting navigation to:', editRoute);
+
+    // Try different navigation approaches
+    if (Platform.OS === 'web') {
+      console.log('[PropertyDetail] Web platform - using router.push');
+      try {
+        router.push(editRoute);
+        console.log('[PropertyDetail] Web navigation successful');
+      } catch (error) {
+        console.error('[PropertyDetail] Web navigation failed:', error);
+        alert('Navigation failed: ' + error.message);
+      }
+    } else {
+      console.log('[PropertyDetail] Mobile platform - showing confirmation dialog');
+      Alert.alert(
+        'Edit Property',
+        'Are you sure you want to edit this property?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => console.log('[PropertyDetail] User cancelled edit')
+          },
+          {
+            text: 'Edit',
+            onPress: () => {
+              console.log('[PropertyDetail] User confirmed edit - attempting mobile navigation');
+              console.log('[PropertyDetail] Route to navigate to:', editRoute);
+
+              try {
+                // Try router.push first
+                console.log('[PropertyDetail] Attempting router.push...');
+                router.push(editRoute);
+                console.log('[PropertyDetail] Mobile router.push successful');
+              } catch (error) {
+                console.error('[PropertyDetail] Mobile router.push failed:', error);
+                console.log('[PropertyDetail] Error details:', {
+                  message: error.message,
+                  stack: error.stack,
+                  route: editRoute
+                });
+
+                // Try alternative navigation method
+                console.log('[PropertyDetail] Trying router.replace as fallback...');
+                try {
+                  router.replace(editRoute);
+                  console.log('[PropertyDetail] Mobile router.replace successful');
+                } catch (replaceError) {
+                  console.error('[PropertyDetail] Mobile router.replace also failed:', replaceError);
+                  console.log('[PropertyDetail] Replace error details:', {
+                    message: replaceError.message,
+                    route: editRoute
+                  });
+
+                  Alert.alert(
+                    'Navigation Error',
+                    `Could not navigate to edit screen.\n\nRoute: ${editRoute}\n\nPlease try again or contact support.`,
+                    [{ text: 'OK' }]
+                  );
+                }
               }
-            } finally {
-              setIsDeleting(false);
             }
           }
+        ]
+      );
+    }
+  };
+
+  const handleDeleteProperty = async () => {
+    console.log('[PropertyDetail] handleDeleteProperty called');
+    if (!property) {
+      console.log('[PropertyDetail] No property to delete');
+      return;
+    }
+
+    console.log('[PropertyDetail] Starting delete for property:', property.id);
+
+    // Skip confirmation on web for testing - directly delete
+    if (Platform.OS === 'web') {
+      console.log('[PropertyDetail] Web platform detected - skipping confirmation');
+      setIsDeleting(true);
+      try {
+        const result = await deleteProperty(property.id);
+        console.log('[PropertyDetail] Delete result:', result);
+        if (result.success) {
+          console.log('[PropertyDetail] Delete successful, navigating back');
+          alert('Property deleted successfully'); // Use browser alert on web
+          // Navigate back to previous screen (likely home tab)
+          router.back();
+        } else {
+          console.log('[PropertyDetail] Delete failed:', result.error);
+          alert(result.error || 'Failed to delete property'); // Use browser alert on web
         }
-      ]
-    );
+      } finally {
+        setIsDeleting(false);
+      }
+    } else {
+      // Mobile - use Alert.alert
+      console.log('[PropertyDetail] Mobile platform - showing confirmation dialog');
+      Alert.alert(
+        'Delete Property',
+        'Are you sure you want to delete this property? This action cannot be undone.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => console.log('[PropertyDetail] User cancelled delete')
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              console.log('[PropertyDetail] User confirmed delete, starting deletion');
+              setIsDeleting(true);
+              try {
+                const result = await deleteProperty(property.id);
+                console.log('[PropertyDetail] Delete result:', result);
+                if (result.success) {
+                  console.log('[PropertyDetail] Delete successful, navigating back');
+                  Alert.alert('Success', 'Property deleted successfully');
+                  // Navigate back to previous screen (likely home tab)
+                  router.back();
+                } else {
+                  console.log('[PropertyDetail] Delete failed:', result.error);
+                  Alert.alert('Error', result.error || 'Failed to delete property');
+                }
+              } finally {
+                setIsDeleting(false);
+              }
+            }
+          }
+        ]
+      );
+    }
   };
 
   if (loading) {
@@ -187,13 +317,32 @@ export default function PropertyDetailsScreen() {
 
 
 
-  const isOwner = user?.id === property.ownerId;
+  const isOwner = user?.uid === property.ownerId;
+
+  // DEBUG: Check ownership
+  console.log('[PropertyDetail] User ID:', user?.uid);
+  console.log('[PropertyDetail] Property Owner ID:', property.ownerId);
+  console.log('[PropertyDetail] Is Owner:', isOwner);
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        {/* Media Gallery */}
-        <View style={styles.imageContainer}>
+      {/* Fixed Header */}
+      <View style={styles.header}>
+        <IconButton
+          icon="chevron-left"
+          iconColor={defaultTheme.colors.onPrimary}
+          size={28}
+          onPress={() => router.back()}
+          style={styles.headerBackButton}
+        />
+        <Title style={styles.headerTitle}>Property Details</Title>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {/* Media Gallery */}
+          <View style={styles.imageContainer}>
           {property.primaryImageUrl || property.media?.length ? (
             property.media && property.media.length > 0 ? (
               <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
@@ -352,10 +501,10 @@ export default function PropertyDetailsScreen() {
             )}
           </Card.Content>
         </Card>
-      </ScrollView>
+        </ScrollView>
 
-      {/* Action Buttons */}
-      <SafeAreaView edges={['bottom']} style={styles.safeAreaContainer}>
+        {/* Action Buttons */}
+        <SafeAreaView edges={['bottom']} style={styles.safeAreaContainer}>
         <View style={styles.actionContainer}>
           {isOwner ? (
             <>
@@ -400,6 +549,7 @@ export default function PropertyDetailsScreen() {
             </>
           )}
         </View>
+        </SafeAreaView>
       </SafeAreaView>
     </View>
   );
@@ -409,6 +559,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: defaultTheme.colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 40,
+    backgroundColor: defaultTheme.colors.primary,
+  },
+  headerBackButton: {
+    margin: -8,
+  },
+  headerTitle: {
+    color: defaultTheme.colors.onPrimary,
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 16,
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,

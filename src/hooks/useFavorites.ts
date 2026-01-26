@@ -30,13 +30,14 @@ export const useFavorites = () => {
       return;
     }
 
-    console.log('🔍 useFavorites: Setting up real-time favorites listener for user:', user.id);
+    const favoritesPath = `users/${user.uid}/favorites`;
+    console.log('🔍 useFavorites: Setting up real-time favorites listener for user:', user.uid);
+    console.log('🔍 useFavorites: Using Firestore path:', favoritesPath);
     setState(prev => ({ ...prev, loading: true, error: null }));
 
-    const favoritesRef = collection(db, 'favorites');
+    const favoritesRef = collection(db, favoritesPath);
     const q = query(
       favoritesRef,
-      where('user_id', '==', user.id),
       orderBy('created_at', 'desc')
     );
 
@@ -106,7 +107,7 @@ export const useFavorites = () => {
       }
 
       const result = await favoriteHelpers.addFavorite({
-        userId: user.id,
+        userId: user.uid,
         propertyId,
       });
 
@@ -127,7 +128,7 @@ export const useFavorites = () => {
         return { success: false, error: 'User not authenticated' };
       }
 
-      const result = await favoriteHelpers.removeFavorite(user.id, propertyId);
+      const result = await favoriteHelpers.removeFavorite(user.uid, propertyId);
 
       if (result.error) {
         return { success: false, error: result.error };

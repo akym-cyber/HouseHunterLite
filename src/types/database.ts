@@ -231,10 +231,10 @@ export interface TypingIndicator {
 export interface Conversation {
   id: string;
   property_id?: string;
-  participant1_id: string;
-  participant2_id: string;
+  participants: string[]; // Array of Firebase Auth UID strings
   last_message_at: string;
   created_at: string;
+  createdBy?: string; // For debugging legacy conversations
 }
 
 export interface ViewingAppointment {

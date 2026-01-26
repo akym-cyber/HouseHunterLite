@@ -17,6 +17,7 @@ import {
 import { router } from 'expo-router';
 import { useFavorites } from '../../src/hooks/useFavorites';
 import { defaultTheme } from '../../src/styles/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
 
@@ -101,14 +102,15 @@ export default function FavoritesScreen() {
         <Title style={styles.headerTitle}>Favorites</Title>
       </View>
       {/* Scrollable Property List */}
-      <ScrollView 
-        style={styles.scrollView} 
-        contentContainerStyle={styles.propertyList} 
-        showsVerticalScrollIndicator={true}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <SafeAreaView style={styles.content} edges={[]}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.propertyList}
+          showsVerticalScrollIndicator={true}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
         {loading ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>⏳</Text>
@@ -142,6 +144,7 @@ export default function FavoritesScreen() {
             ))
         )}
       </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -161,8 +164,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
   },
+  content: {
+    flex: 1,
+  },
   propertyList: {
     padding: 20,
+    paddingTop: 16,
   },
   propertyCard: {
     marginBottom: 16,

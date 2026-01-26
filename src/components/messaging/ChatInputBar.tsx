@@ -84,7 +84,7 @@ function ChatInputBar({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
-  const [inputHeight, setInputHeight] = useState(44);
+  const [inputHeight, setInputHeight] = useState(24);
   const [iconsVisible, setIconsVisible] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
@@ -497,7 +497,7 @@ function ChatInputBar({
   }, [value, onSend, isRecording, startRecording, recordButtonScale]);
 
   const handleContentSizeChange = useCallback((event: any) => {
-    const newHeight = Math.min(Math.max(event.nativeEvent.contentSize.height, 44), 500);
+    const newHeight = Math.min(Math.max(event.nativeEvent.contentSize.height, 24), 88);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setInputHeight(newHeight);
   }, []);
@@ -546,7 +546,7 @@ function ChatInputBar({
         >
           <Ionicons
             name="camera-outline"
-            size={24}
+            size={20}
             color={isLoading ? defaultTheme.colors.onSurfaceVariant : defaultTheme.colors.onSurfaceVariant}
           />
         </TouchableOpacity>
@@ -582,7 +582,7 @@ function ChatInputBar({
             >
               <Ionicons
                 name="attach-outline"
-                size={24}
+                size={20}
                 color={defaultTheme.colors.onSurfaceVariant}
               />
             </TouchableOpacity>
@@ -593,7 +593,7 @@ function ChatInputBar({
             >
               <Ionicons
                 name="happy-outline"
-                size={24}
+                size={20}
                 color={defaultTheme.colors.onSurfaceVariant}
               />
             </TouchableOpacity>
@@ -631,8 +631,8 @@ function ChatInputBar({
           >
             <Ionicons
               name={hasText ? "paper-plane" : "mic"}
-              size={20}
-              color="#0a0a0aff"
+              size={18}
+              color={hasText ? defaultTheme.colors.onPrimary : defaultTheme.colors.onSurface}
               style={hasText ? { transform: [{ rotate: '45deg' }] } : null}
             />
           </TouchableOpacity>
@@ -679,8 +679,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: defaultTheme.colors.outline,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    paddingBottom: Platform.select({ ios: 8, android: 12 }),
+    paddingTop: 6,
+    paddingBottom: Platform.select({ ios: 6, android: 8 }),
   },
   recordingIndicator: {
     flexDirection: 'row',
@@ -704,21 +704,28 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#C6C6C8',
-    paddingLeft: 10,
-    paddingRight: -1,
-    paddingTop: -1,
-    paddingBottom: -1,
-    minHeight: 30,
-    maxHeight: 39,
+    alignItems: 'center',
+    backgroundColor: defaultTheme.colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: defaultTheme.colors.outline,
+    paddingLeft: 8,
+    paddingRight: 6,
+    paddingVertical: 4,
+    minHeight: 36,
+    maxHeight: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   inputWrapperFocused: {
-    borderColor: '#007AFF',
-    borderWidth: 1,
+    borderColor: defaultTheme.colors.primary,
+    borderWidth: 1.5,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   inputWrapperRecording: {
     borderColor: '#ff4444',
@@ -729,10 +736,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: defaultTheme.colors.onSurface,
-    paddingVertical: Platform.select({ ios: 8, android: 6 }),
-    paddingHorizontal: 0,
-    maxHeight: 120,
-    minHeight: 20,
+    paddingVertical: Platform.select({ ios: 6, android: 4 }),
+    paddingHorizontal: 6,
+    maxHeight: 88,
+    minHeight: 24,
+    lineHeight: 20,
+    textAlignVertical: 'center',
   },
   actionIconsContainer: {
     flexDirection: 'row',
@@ -763,27 +772,33 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   rightActionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   rightIconsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   sendButtonContainer: {
-    marginLeft: 8,
-  },
-  sendButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    marginLeft: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 1,
+  },
+  sendButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   emojiModalOverlay: {
     flex: 1,

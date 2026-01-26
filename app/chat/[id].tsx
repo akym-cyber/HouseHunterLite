@@ -146,6 +146,7 @@ export default function ChatScreen() {
         onSendMessage={handleSendMessage}
         onLoadMore={handleLoadMore}
         loading={loadingMessages}
+        onBack={() => router.back()}
         otherUser={{
           id: conversation!.participant1_id === user?.id ? conversation!.participant2_id : conversation!.participant1_id,
           firstName: 'Property', // TODO: Fetch actual user data

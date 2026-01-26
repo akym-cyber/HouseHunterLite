@@ -41,13 +41,21 @@ export const useProperties = () => {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
       let result;
-      
+
       // If user is owner, show their properties
       if (user?.role === 'owner') {
-        result = await propertyHelpers.getPropertiesByOwner(user.id);
+        console.log('[useProperties] OWNER MODE - currentUser.uid:', user.uid);
+        console.log('[useProperties] OWNER MODE - user.role:', user.role);
+        console.log('[useProperties] OWNER MODE - Firestore query: getPropertiesByOwner with ownerId =', user.uid);
+        result = await propertyHelpers.getPropertiesByOwner(user.uid);
+        console.log('[useProperties] OWNER MODE - Query result:', result?.data?.length || 0, 'properties found');
       } else {
-        // If user is tenant, show available properties
+        // If user is tenant, show approved/available properties
+        console.log('[useProperties] TENANT MODE - currentUser.uid:', user.uid);
+        console.log('[useProperties] TENANT MODE - user.role:', user.role);
+        console.log('[useProperties] TENANT MODE - Firestore query: searchProperties with status = available');
         result = await propertyHelpers.searchProperties({ status: 'available' });
+        console.log('[useProperties] TENANT MODE - Query result:', result?.data?.length || 0, 'properties found');
       }
 
       if (result.error) {
@@ -81,35 +89,98 @@ export const useProperties = () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
-      const searchFilters: any = { status: 'available' };
+      let result;
 
-      // Apply filters
-      if (filters.location) {
-        searchFilters.city = filters.location;
-      }
-      if (filters.minPrice) {
-        searchFilters.minPrice = filters.minPrice;
-      }
-      if (filters.maxPrice) {
-        searchFilters.maxPrice = filters.maxPrice;
-      }
-      if (filters.propertyType && filters.propertyType.length > 0) {
-        searchFilters.propertyType = filters.propertyType[0]; // Firestore doesn't support array queries easily
-      }
-      if (filters.bedrooms) {
-        searchFilters.bedrooms = filters.bedrooms;
-      }
-      if (filters.petFriendly !== undefined) {
-        searchFilters.petFriendly = filters.petFriendly;
-      }
-      if (filters.furnished !== undefined) {
-        searchFilters.furnished = filters.furnished;
-      }
-      if (filters.parking !== undefined) {
-        searchFilters.parkingAvailable = filters.parking;
-      }
+      // Role-based search filtering
+      if (user?.role === 'owner') {
+        // Owners search only their own properties
+        console.log('[searchProperties] OWNER MODE - currentUser.uid:', user.uid);
+        console.log('[searchProperties] OWNER MODE - user.role:', user.role);
+        console.log('[searchProperties] OWNER MODE - Firestore query: getPropertiesByOwner (no additional filters applied to owner properties)');
+        result = await propertyHelpers.getPropertiesByOwner(user.uid);
+        console.log('[searchProperties] OWNER MODE - Query result:', result?.data?.length || 0, 'properties found');
 
-      const result = await propertyHelpers.searchProperties(searchFilters);
+        // Apply client-side filtering for owner properties (since we can't filter owner's properties by status in Firestore easily)
+        if (result.data) {
+          let filteredData = result.data;
+
+          // Apply location filter
+          if (filters.location) {
+            filteredData = filteredData.filter(property =>
+              property.city?.toLowerCase().includes(filters.location!.toLowerCase()) ||
+              property.state?.toLowerCase().includes(filters.location!.toLowerCase()) ||
+              property.county?.toLowerCase().includes(filters.location!.toLowerCase())
+            );
+          }
+
+          // Apply price filters
+          if (filters.minPrice) {
+            filteredData = filteredData.filter(property => property.price >= filters.minPrice!);
+          }
+          if (filters.maxPrice) {
+            filteredData = filteredData.filter(property => property.price <= filters.maxPrice!);
+          }
+
+          // Apply property type filter
+          if (filters.propertyType && filters.propertyType.length > 0) {
+            filteredData = filteredData.filter(property => filters.propertyType!.includes(property.propertyType));
+          }
+
+          // Apply bedroom filter
+          if (filters.bedrooms) {
+            filteredData = filteredData.filter(property => property.bedrooms === filters.bedrooms);
+          }
+
+          // Apply other filters
+          if (filters.petFriendly !== undefined) {
+            filteredData = filteredData.filter(property => property.petFriendly === filters.petFriendly);
+          }
+          if (filters.furnished !== undefined) {
+            filteredData = filteredData.filter(property => property.furnished === filters.furnished);
+          }
+          if (filters.parking !== undefined) {
+            filteredData = filteredData.filter(property => property.parkingAvailable === filters.parking);
+          }
+
+          result.data = filteredData;
+        }
+      } else {
+        // Tenants search available properties with filters
+        console.log('[searchProperties] TENANT MODE - currentUser.uid:', user?.uid);
+        console.log('[searchProperties] TENANT MODE - user.role:', user?.role);
+
+        const searchFilters: any = { status: 'available' };
+
+        // Apply filters
+        if (filters.location) {
+          searchFilters.city = filters.location;
+        }
+        if (filters.minPrice) {
+          searchFilters.minPrice = filters.minPrice;
+        }
+        if (filters.maxPrice) {
+          searchFilters.maxPrice = filters.maxPrice;
+        }
+        if (filters.propertyType && filters.propertyType.length > 0) {
+          searchFilters.propertyType = filters.propertyType[0]; // Firestore doesn't support array queries easily
+        }
+        if (filters.bedrooms) {
+          searchFilters.bedrooms = filters.bedrooms;
+        }
+        if (filters.petFriendly !== undefined) {
+          searchFilters.petFriendly = filters.petFriendly;
+        }
+        if (filters.furnished !== undefined) {
+          searchFilters.furnished = filters.furnished;
+        }
+        if (filters.parking !== undefined) {
+          searchFilters.parkingAvailable = filters.parking;
+        }
+
+        console.log('[searchProperties] TENANT MODE - Firestore query: searchProperties with filters:', searchFilters);
+        result = await propertyHelpers.searchProperties(searchFilters);
+        console.log('[searchProperties] TENANT MODE - Query result:', result?.data?.length || 0, 'properties found');
+      }
 
       if (result.error) {
         setState(prev => ({
@@ -160,7 +231,7 @@ export const useProperties = () => {
 
       const result = await propertyHelpers.addProperty({
         ...propertyData,
-        ownerId: user.id,
+        ownerId: user.uid,
       });
 
       if (result.error) {

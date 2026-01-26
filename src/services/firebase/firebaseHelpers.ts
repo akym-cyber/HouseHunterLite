@@ -277,11 +277,13 @@ export const favoriteHelpers = {
   // Get favorites by user
   async getFavoritesByUser(userId: string): Promise<FirestoreResponse<Property[]>> {
     try {
+      const favoritesPath = `users/${userId}/favorites`;
       console.log('🔍 favoriteHelpers: Getting favorites for user:', userId);
-      const favoritesRef = collection(db, COLLECTIONS.FAVORITES);
+      console.log('🔍 favoriteHelpers: Using Firestore path:', favoritesPath);
+
+      const favoritesRef = collection(db, favoritesPath);
       const q = query(
         favoritesRef,
-        where('user_id', '==', userId),
         orderBy('created_at', 'desc')
       );
 
@@ -322,21 +324,26 @@ export const favoriteHelpers = {
   // Add favorite
   async addFavorite(favoriteData: { userId: string; propertyId: string }): Promise<FirestoreResponse<Favorite>> {
     try {
-      const favoritesRef = collection(db, COLLECTIONS.FAVORITES);
+      const favoritesPath = `users/${favoriteData.userId}/favorites`;
+      console.log('🔍 favoriteHelpers: Adding favorite for user:', favoriteData.userId);
+      console.log('🔍 favoriteHelpers: Using Firestore path:', favoritesPath);
+
+      const favoritesRef = collection(db, favoritesPath);
       const docRef = await addDoc(favoritesRef, {
-        user_id: favoriteData.userId,
         property_id: favoriteData.propertyId,
         created_at: serverTimestamp()
       });
-      
-      return { data: { 
-        id: docRef.id, 
-        user_id: favoriteData.userId,
+
+      console.log('🔍 favoriteHelpers: Created favorite document:', docRef.id);
+
+      return { data: {
+        id: docRef.id,
+        user_id: favoriteData.userId, // Keep for compatibility
         property_id: favoriteData.propertyId,
         created_at: new Date().toISOString()
       } as Favorite, error: null };
     } catch (error: any) {
-      console.error('Error adding favorite:', error);
+      console.error('🔍 favoriteHelpers: Error adding favorite:', error);
       return { data: null, error: error.message };
     }
   },

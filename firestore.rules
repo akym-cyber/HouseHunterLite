@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection - basic read/write for authenticated users
+    match /users/{userId} {
+      // Allow authenticated users to read/write their own profile
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Properties collection
+    match /properties/{propertyId} {
+      // Allow anyone to read properties (for browsing)
+      allow read: if true;
+
+      // Only authenticated property owners can create/update/delete their properties
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerId;
+      allow update, delete: if request.auth != null &&
+                               request.auth.uid == get(/databases/$(database)/documents/properties/$(propertyId)).data.ownerId;
+    }
+
+    // User-scoped favorites subcollection
+    match /users/{userId}/favorites/{favoriteId} {
+      // Users can only manage their own favorites
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Conversations collection
+    match /conversations/{conversationId} {
+      // Allow read if user is in participants array
+      allow read: if request.auth != null &&
+                     resource.data.participants.hasAny([request.auth.uid]);
+
+      // Allow create for authenticated users (validation happens in code)
+      allow create: if request.auth != null;
+
+      // Allow update for participants only
+      allow update: if request.auth != null &&
+                       resource.data.participants.hasAny([request.auth.uid]);
+    }
+
+    // Messages subcollection under conversations
+    match /conversations/{conversationId}/messages/{messageId} {
+      // Allow read/write for conversation participants
+      allow read, write: if request.auth != null &&
+                            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]);
+    }
+
+    // Inquiries collection
+    match /inquiries/{inquiryId} {
+      // Allow property owners to read inquiries for their properties
+      allow read: if request.auth != null &&
+                     (request.auth.uid == resource.data.owner_id ||
+                      request.auth.uid == resource.data.tenant_id);
+
+      // Allow tenants to create inquiries
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.tenant_id;
+
+      // Allow property owners to update inquiry status
+      allow update: if request.auth != null && request.auth.uid == resource.data.owner_id;
+    }
+
+    // Default deny for any other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -150,17 +150,17 @@ export default function CreatePropertyScreen() {
 
     // 1. Check user
     console.log('1. User exists?', !!user);
-    console.log('2. User ID:', user?.id || user?.uid);
+    console.log('2. User ID (uid):', user?.uid);
 
     // 2. Check form data
-    console.log('3. Form data:', JSON.stringify(formData, null, 2));
+    console.log('4. Form data:', JSON.stringify(formData, null, 2));
 
     // 3. Check validation
-    console.log('4. Form valid?', isValid);
-    console.log('5. Validation errors:', errors);
+    console.log('5. Form valid?', isValid);
+    console.log('6. Validation errors:', errors);
 
     // 4. Check media
-    console.log('6. Has images?', media.length > 0);
+    console.log('7. Has images?', media.length > 0);
 
     setLoading(true);
     setUploadProgress(0);
@@ -171,7 +171,7 @@ export default function CreatePropertyScreen() {
         title: formData.title || 'Test Property',
         price: formData.price ? parseFloat(formData.price) : 1000,
         createdAt: new Date().toISOString(),
-        userId: user?.id || user?.uid,
+        userId: user?.uid,
         test: true,
       };
       console.log('8. Test data:', testData);
@@ -189,7 +189,7 @@ export default function CreatePropertyScreen() {
         bedrooms: 1,
         bathrooms: 1,
         status: 'available' as const,
-        ownerId: user?.id || user?.uid || '',
+        ownerId: user?.uid || '',
       } as any);
       console.log('9. Firestore result (test):', testResult);
 

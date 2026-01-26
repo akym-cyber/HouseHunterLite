@@ -1,8 +1,9 @@
 // src/services/firebase/firebaseConfig.ts
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { Platform } from 'react-native';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -18,9 +19,18 @@ const firebaseConfig = {
 // ✅ SINGLE initialization
 export const app = initializeApp(firebaseConfig);
 
-// ✅ SIMPLE + STABLE auth
-export const auth = getAuth(app);
+// ✅ AUTH with persistence
+let auth: any;
+try {
+  // Try to get existing auth instance
+  auth = getAuth(app);
+} catch (error) {
+  console.log('Auth initialization error:', error);
+  auth = getAuth(app);
+}
 
 // ✅ Firestore + Storage
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+export { auth };
