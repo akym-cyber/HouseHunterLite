@@ -503,7 +503,7 @@ function ChatInputBar({
   }, [value, onSend, isRecording, startRecording, recordButtonScale]);
 
   const handleContentSizeChange = useCallback((event: any) => {
-    const newHeight = Math.min(Math.max(event.nativeEvent.contentSize.height, 24), 88);
+    const newHeight = Math.min(Math.max(event.nativeEvent.contentSize.height, 24), 120);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setInputHeight(newHeight);
   }, []);
@@ -511,7 +511,10 @@ function ChatInputBar({
   const showActionIcons = !hasText && !isRecording;
 
   return (
-    <View style={styles.inputContainer}>
+    <View style={[
+      styles.inputContainer,
+      !isKeyboardVisible && styles.inputContainerRaised,
+    ]}>
       {/* Recording indicator */}
       {isRecording && (
         <View style={styles.recordingIndicator}>
@@ -565,6 +568,7 @@ function ChatInputBar({
           placeholder={placeholder}
           placeholderTextColor={theme.colors.onSurfaceVariant}
           multiline
+          scrollEnabled={false}
           blurOnSubmit={false}
           inputAccessoryViewID={Platform.OS === 'ios' ? inputAccessoryViewID : undefined}
           onFocus={() => {
@@ -689,6 +693,9 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     paddingTop: 6,
     paddingBottom: Platform.select({ ios: 6, android: 8 }),
   },
+  inputContainerRaised: {
+    marginBottom: 44,
+  },
   recordingIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -745,7 +752,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     color: theme.colors.onSurface,
     paddingVertical: Platform.select({ ios: 6, android: 4 }),
     paddingHorizontal: 6,
-    maxHeight: 88,
+    maxHeight: 120,
     minHeight: 24,
     lineHeight: 20,
     textAlignVertical: 'center',

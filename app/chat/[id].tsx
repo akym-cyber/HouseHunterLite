@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { View, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, Button } from 'react-native-paper';
 import { useMessages } from '../../src/hooks/useMessages';
@@ -534,32 +535,40 @@ export default function ChatScreen() {
   const lastSeen = otherUser?.lastSeen || otherUser?.updatedAt || otherUser?.createdAt;
 
   return (
-    <View style={styles.container}>
-      <ChatRoom
-        key={`chatroom-${conversation.id}-${user?.uid || 'guest'}`}
-        conversation={conversation!}
-        messages={chatMessages}
-        onSendMessage={handleSendMessage}
-        onLoadMore={handleLoadMore}
-        loading={loadingMessages}
-        onBack={() => router.back()}
-        onDeleteMessageForMe={handleDeleteMessageForMe}
-        onDeleteMessageForEveryone={handleDeleteMessageForEveryone}
-        onSendVoiceMessage={handleSendVoiceMessage}
-        onRetryVoice={handleRetryVoice}
-        otherUser={otherId ? {
-          id: otherId,
-          firstName: nameParts.firstName,
-          lastName: nameParts.lastName,
-          avatarUrl,
-          isOnline: otherUser?.isOnline ?? false,
-          lastSeen,
-        } : undefined}
-        propertyReferences={propertyRefs}
-        onPropertyPress={(propertyId) => router.push(`/property/${propertyId}`)}
-        onSendPropertyOffer={handleSendPropertyOffer}
-      />
-    </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      <SafeAreaView style={styles.safeArea} edges={[]}>
+        <View style={styles.chatWrapper}>
+          <ChatRoom
+            key={`chatroom-${conversation.id}-${user?.uid || 'guest'}`}
+            conversation={conversation!}
+            messages={chatMessages}
+            onSendMessage={handleSendMessage}
+            onLoadMore={handleLoadMore}
+            loading={loadingMessages}
+            onBack={() => router.back()}
+            onDeleteMessageForMe={handleDeleteMessageForMe}
+            onDeleteMessageForEveryone={handleDeleteMessageForEveryone}
+            onSendVoiceMessage={handleSendVoiceMessage}
+            onRetryVoice={handleRetryVoice}
+            otherUser={otherId ? {
+              id: otherId,
+              firstName: nameParts.firstName,
+              lastName: nameParts.lastName,
+              avatarUrl,
+              isOnline: otherUser?.isOnline ?? false,
+              lastSeen,
+            } : undefined}
+            propertyReferences={propertyRefs}
+            onPropertyPress={(propertyId) => router.push(`/property/${propertyId}`)}
+            onSendPropertyOffer={handleSendPropertyOffer}
+          />
+        </View>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -567,6 +576,12 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   container: {
     flex: 1,
     backgroundColor: theme.app.background,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  chatWrapper: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

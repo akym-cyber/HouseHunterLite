@@ -32,6 +32,31 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const isDeletedForEveryone = !!message.deleted_for_everyone;
   const displayContent = isDeletedForEveryone ? 'This message was deleted' : message.content;
+  const smartWrapText = (text: string) => {
+    const lower = text.toLowerCase();
+    const needsWrapping = () => {
+      if (text.length < 30) return false;
+      if (text.includes(' ')) return false; // Normal text wraps naturally
+
+      const isLikelyUrl =
+        lower.includes('http')
+        || /\.(com|org|net|io|dev|co|app|uk|ca|au|edu|gov)[/\s]/.test(lower)
+        || text.includes('/')
+        || text.length > 50;
+
+      return isLikelyUrl;
+    };
+
+    if (!needsWrapping()) return text;
+
+    // Insert zero-width space every 28 chars for URLs/longWords
+    return text.replace(/(.{28})/g, '$1\u200B');
+  };
+
+  const displayContentWrapped = useMemo(() => {
+    if (!displayContent) return displayContent;
+    return smartWrapText(displayContent);
+  }, [displayContent]);
   const audioMedia = message.media?.find(item => item.type === 'audio' || item.type === 'voice');
   const attachmentAudioUrl = message.message_type === 'audio' ? message.attachment_url : undefined;
   const remoteUrl =
@@ -144,7 +169,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
               uploadStatus={message.upload_status}
               uploadProgress={message.upload_progress}
               sentTime={formatMessageTime(message.created_at)}
-              showDebug={__DEV__}
+              showDebug={false}
               format={audioFormat}
               mimeType={audioMimeType}
               statusIcon={isOwnMessage && !isDeletedForEveryone ? statusDisplay.icon : undefined}
@@ -158,7 +183,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
               isOwnMessage ? styles.ownText : styles.otherText,
               isDeletedForEveryone && styles.deletedText,
             ]}>
-              {displayContent}
+              {displayContentWrapped}
             </Text>
           )}
 
@@ -213,16 +238,17 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   // Bubble container
   bubbleContainer: {
     maxWidth: '100%',
+    flexShrink: 1,
   },
   ownBubbleContainer: {
     alignItems: 'flex-end',
     marginRight: 4,
-    maxWidth: '88%',
+    maxWidth: '75%',
   },
   otherBubbleContainer: {
     alignItems: 'flex-start',
     marginLeft: 4,
-    maxWidth: '98%',
+    maxWidth: '75%',
   },
   // Bubble styling - COMPACT VERSION
   bubble: {
@@ -232,6 +258,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     minHeight: 12,
     minWidth: 0,
     maxWidth: '100%',
+    flexShrink: 1,
+    overflow: 'hidden',
     marginBottom: 0,
     alignSelf: 'flex-start',
     justifyContent: 'center',
@@ -270,6 +298,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     fontSize: 16,
     lineHeight: 20,
     includeFontPadding: false,
+    flexShrink: 1,
+    maxWidth: '100%',
+    flexWrap: 'wrap',
+    alignSelf: 'flex-start',
     textAlign: 'left',
     ...Platform.select({
       android: { textAlignVertical: 'top' },

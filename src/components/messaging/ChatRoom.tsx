@@ -5,22 +5,17 @@ import {
   Platform,
   Alert,
   Clipboard,
-  Keyboard,
-  KeyboardAvoidingView,
   Animated,
-  LayoutAnimation,
   UIManager,
-  InputAccessoryView,
   TextInput,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { FlatList } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Text,
   Avatar,
   IconButton,
-  ActivityIndicator,
 } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
@@ -56,9 +51,6 @@ interface ChatRoomProps {
 }
 
 const SCROLL_THRESHOLD = 100;
-const MESSAGE_HEIGHT_ESTIMATE = 60;
-const HEADER_HEIGHT = 47; // Approximate header height
-const INPUT_BAR_HEIGHT = 50; // Approximate input bar height
 
 function ChatRoom({
   conversation,
@@ -75,29 +67,21 @@ function ChatRoom({
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Message>>(null);
   const chatInputRef = useRef<TextInput | null>(null);
-  const accessoryTriggerRef = useRef<TextInput | null>(null);
-  const pendingAccessoryFocusRef = useRef(false);
   const scrollPositionRef = useRef({ offset: 0, contentHeight: 0, layoutHeight: 0 });
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const keepPinnedToBottomRef = useRef(false);
 
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Video call pulse animation
   const videoCallPulseAnim = useRef(new Animated.Value(0)).current;
-
-  const keyboardVerticalOffset = useMemo(() => HEADER_HEIGHT, []);
-  const inputAccessoryId = useMemo(
-    () => `chat-input-accessory-${conversation.id}-${user?.uid || 'guest'}`,
-    [conversation.id, user?.uid]
-  );
-  const showInputPlaceholder = Platform.OS === 'ios' && keyboardHeight === 0;
 
   // Initialize pulse animation
   useEffect(() => {
@@ -121,6 +105,9 @@ function ChatRoom({
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
+      if (autoScrollTimeoutRef.current) {
+        clearTimeout(autoScrollTimeoutRef.current);
+      }
     };
   }, [videoCallPulseAnim]);
 
@@ -133,6 +120,50 @@ function ChatRoom({
       });
     }
   }, [isNearBottom]);
+
+  const scrollToExactBottom = useCallback((animated = false) => {
+    if (!flatListRef.current) return;
+    const { contentHeight, layoutHeight } = scrollPositionRef.current;
+    if (contentHeight && layoutHeight) {
+      const offset = Math.max(0, contentHeight - layoutHeight);
+      flatListRef.current.scrollToOffset({ offset, animated });
+      return;
+    }
+    flatListRef.current.scrollToEnd({ animated });
+  }, []);
+
+  const scrollToLastMessage = useCallback((animated = false) => {
+    if (!flatListRef.current) return;
+    const lastIndex = messages.length - 1;
+    if (lastIndex < 0) return;
+    flatListRef.current.scrollToIndex({ index: lastIndex, viewPosition: 1, animated });
+  }, [messages.length]);
+
+  const kickToExactBottom = useCallback((animated = false) => {
+    scrollToLastMessage(animated);
+    requestAnimationFrame(() => {
+      scrollToLastMessage(false);
+    });
+  }, [scrollToLastMessage]);
+
+  const scheduleAutoScroll = useCallback((delayMs: number) => {
+    if (autoScrollTimeoutRef.current) {
+      clearTimeout(autoScrollTimeoutRef.current);
+    }
+
+    if (delayMs <= 0) {
+      if (!isUserScrollingRef.current) {
+        scrollToBottom(true, true);
+      }
+      return;
+    }
+
+    autoScrollTimeoutRef.current = setTimeout(() => {
+      if (!isUserScrollingRef.current) {
+        scrollToBottom(true, true);
+      }
+    }, delayMs);
+  }, [scrollToBottom]);
 
   // Track scroll position
   const handleScroll = useCallback((event: any) => {
@@ -147,6 +178,9 @@ function ChatRoom({
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
     const nowNearBottom = distanceFromBottom < SCROLL_THRESHOLD;
     setIsNearBottom(nowNearBottom);
+    if (nowNearBottom) {
+      keepPinnedToBottomRef.current = true;
+    }
 
     isUserScrollingRef.current = true;
     if (scrollTimeoutRef.current) {
@@ -159,6 +193,11 @@ function ChatRoom({
 
   const handleScrollBeginDrag = useCallback(() => {
     isUserScrollingRef.current = true;
+    keepPinnedToBottomRef.current = false;
+    if (autoScrollTimeoutRef.current) {
+      clearTimeout(autoScrollTimeoutRef.current);
+      autoScrollTimeoutRef.current = null;
+    }
   }, []);
 
   const handleScrollEndDrag = useCallback(() => {
@@ -167,48 +206,18 @@ function ChatRoom({
     }, 500);
   }, []);
 
-  // Keyboard handling
-  useEffect(() => {
-    const showSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-        if (Platform.OS === 'ios' && pendingAccessoryFocusRef.current) {
-          pendingAccessoryFocusRef.current = false;
-          requestAnimationFrame(() => {
-            if (chatInputRef.current) {
-              chatInputRef.current.focus();
-            } else {
-              setTimeout(() => chatInputRef.current?.focus(), 30);
-            }
-          });
-        }
-        setTimeout(() => scrollToBottom(true, true), 100);
-      }
-    );
-
-    const hideSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0);
-      }
-    );
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, [isNearBottom, scrollToBottom]);
-
   // Scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > 0 && isNearBottom && !isUserScrollingRef.current) {
-      const timeout = setTimeout(() => {
-        scrollToBottom(true, true);
-      }, 50);
-      return () => clearTimeout(timeout);
+      scheduleAutoScroll(0);
+      return () => {
+        if (autoScrollTimeoutRef.current) {
+          clearTimeout(autoScrollTimeoutRef.current);
+          autoScrollTimeoutRef.current = null;
+        }
+      };
     }
-  }, [messages.length, isNearBottom, scrollToBottom]);
+  }, [messages.length, isNearBottom, scheduleAutoScroll]);
 
   // Format timestamp
   const formatMessageTime = useCallback((timestamp: any): string => {
@@ -395,7 +404,9 @@ function ChatRoom({
     return (
       <>
         {dateSeparator && (
-          <DateSeparator dateText={dateSeparator} />
+          <View style={styles.dateSeparatorWrap}>
+            <DateSeparator dateText={dateSeparator} />
+          </View>
         )}
 
         <TouchableOpacity
@@ -462,15 +473,6 @@ function ChatRoom({
     handleRetry,
     handleMessageLongPress,
   ]);
-
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: MESSAGE_HEIGHT_ESTIMATE,
-      offset: MESSAGE_HEIGHT_ESTIMATE * index,
-      index,
-    }),
-    []
-  );
 
   const keyExtractor = useCallback((item: Message) => item.id, []);
 
@@ -546,14 +548,38 @@ function ChatRoom({
 
   const handleInputFocus = useCallback(() => {
     setIsInputFocused(true);
-    if (isNearBottom) {
-      setTimeout(() => scrollToBottom(true, true), 200);
-    }
-  }, [isNearBottom, scrollToBottom]);
+    // Ensure the latest message is visible above the keyboard when focusing input.
+    keepPinnedToBottomRef.current = true;
+    kickToExactBottom(false);
+  }, [kickToExactBottom]);
 
   const handleInputBlur = useCallback(() => {
     setIsInputFocused(false);
+    keepPinnedToBottomRef.current = false;
   }, []);
+
+  const handleListLayout = useCallback((event: any) => {
+    const layoutHeight = event?.nativeEvent?.layout?.height;
+    if (typeof layoutHeight === 'number') {
+      scrollPositionRef.current = {
+        ...scrollPositionRef.current,
+        layoutHeight,
+      };
+    }
+    if (!keepPinnedToBottomRef.current || isUserScrollingRef.current) return;
+    kickToExactBottom(false);
+  }, [kickToExactBottom]);
+
+  const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    if (typeof height === 'number') {
+      scrollPositionRef.current = {
+        ...scrollPositionRef.current,
+        contentHeight: height,
+      };
+    }
+    if (!keepPinnedToBottomRef.current || isUserScrollingRef.current) return;
+    kickToExactBottom(false);
+  }, [kickToExactBottom]);
 
   const renderHeader = useCallback(() => {
     const handlePhoneCall = async () => {
@@ -657,171 +683,76 @@ function ChatRoom({
   }, [onBack, otherUser, formatMessageTime, videoCallPulseAnim, insets.top]);
 
   // Loading state
-  if (loading && messages.length === 0) {
-    return (
-      <View style={styles.chatContainer}>
-        {renderHeader()}
-        <SafeAreaView style={styles.chatSafeArea} edges={[]}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.loadingText}>Loading messages...</Text>
-          </View>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  // Calculate content padding - adjust based on keyboard state
-  const contentPaddingBottom = useMemo(() => {
-    const basePadding = INPUT_BAR_HEIGHT + insets.bottom + 12;
-
-    if (keyboardHeight > 0) {
-      // Keyboard open - add keyboard height so bubbles stay above it.
-      return keyboardHeight + basePadding;
+  const maintainVisiblePosition = useMemo(() => {
+    if (Platform.OS === 'ios') {
+      return undefined;
     }
 
-    // Keyboard closed - normal spacing at bottom
-    return basePadding + 12;
-  }, [keyboardHeight, insets.bottom]);
+    return isNearBottom && messages.length > 0
+      ? { minIndexForVisible: messages.length - 1 }
+      : undefined;
+  }, [isNearBottom, messages.length]);
 
   return (
-    <View style={styles.chatContainer}>
-      {renderHeader()}
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={keyboardVerticalOffset}
-      >
-        <SafeAreaView style={styles.chatSafeArea} edges={[]}>
-          <View style={styles.contentWrapper}>
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              renderItem={renderMessage}
-              keyExtractor={keyExtractor}
-              getItemLayout={getItemLayout}
-              contentContainerStyle={[
-                styles.messagesContent,
-                { 
-                  paddingBottom: contentPaddingBottom,
-                  flexGrow: 1,
-                }
-              ]}
-              style={styles.messagesList}
-              onContentSizeChange={() => {
-                if (keyboardHeight > 0 && isInputFocused) {
-                  scrollToBottom(false, true);
-                }
-              }}
-              onScroll={handleScroll}
-              onScrollBeginDrag={handleScrollBeginDrag}
-              onScrollEndDrag={handleScrollEndDrag}
-              onEndReached={onLoadMore}
-              onEndReachedThreshold={0.5}
-              keyboardDismissMode="interactive"
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              removeClippedSubviews={Platform.OS === 'android'}
-              maxToRenderPerBatch={10}
-              updateCellsBatchingPeriod={50}
-              initialNumToRender={15}
-              windowSize={10}
-              maintainVisibleContentPosition={
-                isNearBottom && messages.length > 0
-                  ? { minIndexForVisible: messages.length - 1 }
-                  : undefined
-              }
-            />
-
-            {Platform.OS === 'ios' && (
-              <TextInput
-                ref={accessoryTriggerRef}
-                style={styles.hiddenAccessoryInput}
-                value=""
-                onChangeText={() => {}}
-                blurOnSubmit={false}
-                inputAccessoryViewID={inputAccessoryId}
-                caretHidden
-                contextMenuHidden
-                onFocus={() => {
-                  pendingAccessoryFocusRef.current = true;
-                  setIsInputFocused(true);
-                }}
-                onBlur={handleInputBlur}
-              />
-            )}
-
-            {showInputPlaceholder && (
-              <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
-                <TouchableOpacity
-                  activeOpacity={1}
-                  onPress={() => accessoryTriggerRef.current?.focus()}
-                  style={styles.inputPlaceholderTap}
-                >
-                  <View style={styles.inputPlaceholderBar}>
-                    <Ionicons name="camera-outline" size={20} color={theme.colors.onSurfaceVariant} />
-                    <Text style={styles.inputPlaceholderText}>Message</Text>
-                    <Ionicons name="mic" size={18} color={theme.colors.onSurfaceVariant} />
-                  </View>
-                </TouchableOpacity>
-              </SafeAreaView>
-            )}
-
-            {Platform.OS === 'ios' ? (
-              <InputAccessoryView nativeID={inputAccessoryId} backgroundColor="transparent">
-                <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
-                  <ChatInputBar
-                    value={newMessage}
-                    onChangeText={setNewMessage}
-                    onSend={handleSend}
-                    onSendMedia={handleSendMedia}
-                    onSendVoice={handleSendVoice}
-                    conversationId={conversation.id}
-                    isFocused={isInputFocused}
-                    onFocus={handleInputFocus}
-                    onBlur={handleInputBlur}
-                    inputAccessoryViewID={inputAccessoryId}
-                    inputRef={chatInputRef}
-                  />
-                </SafeAreaView>
-              </InputAccessoryView>
-            ) : (
-              <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
-                <ChatInputBar
-                  value={newMessage}
-                  onChangeText={setNewMessage}
-                  onSend={handleSend}
-                  onSendMedia={handleSendMedia}
-                  onSendVoice={handleSendVoice}
-                  conversationId={conversation.id}
-                  isFocused={isInputFocused}
-                  onFocus={handleInputFocus}
-                  onBlur={handleInputBlur}
-                />
-              </SafeAreaView>
-            )}
-          </View>
-        </SafeAreaView>
-      </KeyboardAvoidingView>
-    </View>
+    <>
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={keyExtractor}
+        style={styles.messagesList}
+        contentContainerStyle={[
+          styles.messagesContent,
+          isInputFocused && styles.messagesContentKeyboard,
+        ]}
+        onLayout={handleListLayout}
+        onContentSizeChange={handleContentSizeChange}
+        ListHeaderComponent={renderHeader}
+        ListHeaderComponentStyle={styles.listHeader}
+        stickyHeaderIndices={[0]}
+        onScroll={handleScroll}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
+        onEndReached={onLoadMore}
+        onEndReachedThreshold={0.5}
+        onScrollToIndexFailed={(info) => {
+          const offset = info.averageItemLength * info.index;
+          flatListRef.current?.scrollToOffset({ offset, animated: false });
+          requestAnimationFrame(() => {
+            flatListRef.current?.scrollToIndex({
+              index: info.index,
+              viewPosition: 1,
+              animated: false,
+            });
+          });
+        }}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={Platform.OS === 'android'}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        initialNumToRender={15}
+        windowSize={10}
+        maintainVisibleContentPosition={maintainVisiblePosition}
+      />
+      <ChatInputBar
+        value={newMessage}
+        onChangeText={setNewMessage}
+        onSend={handleSend}
+        onSendMedia={handleSendMedia}
+        onSendVoice={handleSendVoice}
+        conversationId={conversation.id}
+        isFocused={isInputFocused}
+        onFocus={handleInputFocus}
+        onBlur={handleInputBlur}
+        inputRef={chatInputRef}
+      />
+    </>
   );
 }
 
 const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
-  chatContainer: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  keyboardAvoid: {
-    flex: 1,
-  },
-  chatSafeArea: {
-    flex: 1,
-  },
-  contentWrapper: {
-    flex: 1,
-    flexDirection: 'column',
-  },
   messagesList: {
     flex: 1,
   },
@@ -870,9 +801,17 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     padding: 8,
     marginLeft: 4,
   },
+  listHeader: {
+    marginBottom: 16,
+  },
   messagesContent: {
+    paddingBottom: 6,
+  },
+  messagesContentKeyboard: {
+    paddingBottom: 40,
+  },
+  dateSeparatorWrap: {
     paddingHorizontal: 16,
-    paddingTop: 16,
   },
   messageContent: {
     maxWidth: '100%',
@@ -889,6 +828,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     flexDirection: 'row',
     marginBottom: 4,
     alignItems: 'flex-end',
+    paddingHorizontal: 16,
   },
   consecutiveMessage: {
     marginTop: 2,
@@ -914,47 +854,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   replyPreviewText: {
     fontSize: 12,
-    color: theme.colors.onSurfaceVariant,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: theme.colors.onSurfaceVariant,
-  },
-  inputSafeArea: {
-    backgroundColor: theme.colors.background,
-  },
-  hiddenAccessoryInput: {
-    position: 'absolute',
-    width: 1,
-    height: 1,
-    opacity: 0,
-    bottom: 0,
-    left: 0,
-  },
-  inputPlaceholderTap: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  inputPlaceholderBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: theme.colors.outline,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 10,
-  },
-  inputPlaceholderText: {
-    flex: 1,
-    fontSize: 16,
     color: theme.colors.onSurfaceVariant,
   },
 });
