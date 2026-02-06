@@ -212,15 +212,17 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   
   // Bubble container
   bubbleContainer: {
-    maxWidth: '78%',
+    maxWidth: '100%',
   },
   ownBubbleContainer: {
     alignItems: 'flex-end',
     marginRight: 4,
+    maxWidth: '88%',
   },
   otherBubbleContainer: {
     alignItems: 'flex-start',
     marginLeft: 4,
+    maxWidth: '98%',
   },
   // Bubble styling - COMPACT VERSION
   bubble: {

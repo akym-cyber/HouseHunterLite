@@ -57,7 +57,7 @@ interface ChatRoomProps {
 
 const SCROLL_THRESHOLD = 100;
 const MESSAGE_HEIGHT_ESTIMATE = 60;
-const HEADER_HEIGHT = 60; // Approximate header height
+const HEADER_HEIGHT = 47; // Approximate header height
 const INPUT_BAR_HEIGHT = 50; // Approximate input bar height
 
 function ChatRoom({
@@ -183,9 +183,7 @@ function ChatRoom({
             }
           });
         }
-        if (isNearBottom) {
-          setTimeout(() => scrollToBottom(true, true), 100);
-        }
+        setTimeout(() => scrollToBottom(true, true), 100);
       }
     );
 
@@ -262,6 +260,35 @@ function ChatRoom({
     }
   }, []);
 
+  const formatMessageClock = useCallback((timestamp: any): string => {
+    try {
+      let messageTime: Date;
+
+      if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
+        messageTime = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+      } else if (typeof timestamp === 'string') {
+        messageTime = new Date(timestamp);
+      } else if (typeof timestamp === 'number') {
+        messageTime = new Date(timestamp);
+      } else if (timestamp instanceof Date) {
+        messageTime = timestamp;
+      } else {
+        return '';
+      }
+
+      if (isNaN(messageTime.getTime())) {
+        return '';
+      }
+
+      return messageTime.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    } catch (error) {
+      return '';
+    }
+  }, []);
+
   const getMessageStatusIcon = useCallback((status?: string): string | null => {
     switch (status) {
       case 'sending': return '⏳';
@@ -287,15 +314,15 @@ function ChatRoom({
   }, []);
 
   const getDateSeparator = useCallback((messages: Message[], index: number): string | null => {
-    if (index === 0) return null;
-
     const currentMessage = messages[index];
-    const previousMessage = messages[index - 1];
+    const previousMessage = index > 0 ? messages[index - 1] : null;
 
     const currentDate = timestampToDate(currentMessage.created_at).toDateString();
-    const previousDate = timestampToDate(previousMessage.created_at).toDateString();
+    const previousDate = previousMessage
+      ? timestampToDate(previousMessage.created_at).toDateString()
+      : null;
 
-    if (currentDate !== previousDate) {
+    if (index === 0 || currentDate !== previousDate) {
       const messageDate = timestampToDate(currentMessage.created_at);
       const today = new Date();
       const yesterday = new Date(today);
@@ -363,6 +390,7 @@ function ChatRoom({
     const isOwnMessage = item.sender_id === user?.uid;
     const dateSeparator = getDateSeparator(messages, index);
     const isConsecutive = isConsecutiveFromSameSender(index);
+    const shouldShowAvatar = !isOwnMessage && !isConsecutive;
 
     return (
       <>
@@ -381,15 +409,29 @@ function ChatRoom({
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           activeOpacity={0.9}
         >
-          {!isOwnMessage && !isConsecutive && (
-            <Avatar.Text
-              size={32}
-              label={otherUser?.firstName?.[0] || 'U'}
-              style={styles.messageAvatar}
-            />
+          {shouldShowAvatar && (
+            otherUser?.avatarUrl ? (
+              <Avatar.Image
+                size={32}
+                source={{ uri: otherUser.avatarUrl }}
+                style={styles.messageAvatar}
+              />
+            ) : (
+              <Avatar.Text
+                size={32}
+                label={otherUser?.firstName?.[0] || 'U'}
+                style={styles.messageAvatar}
+              />
+            )
           )}
 
-          <View style={{ maxWidth: '80%' }}>
+          <View
+            style={[
+              styles.messageContent,
+              shouldShowAvatar && styles.otherMessageContent,
+              !isOwnMessage && !shouldShowAvatar && styles.otherMessageContentIndented,
+            ]}
+          >
             {item.reply_to && (
               <View style={styles.replyPreview}>
                 <Text style={styles.replyPreviewText}>Replying to message</Text>
@@ -399,7 +441,7 @@ function ChatRoom({
             <ChatBubble
               message={item}
               isOwnMessage={isOwnMessage}
-              formatMessageTime={formatMessageTime}
+              formatMessageTime={formatMessageClock}
               getMessageStatusIcon={getMessageStatusIcon}
               isSending={item.status === 'sending'}
               onRetry={handleRetry}
@@ -559,7 +601,7 @@ function ChatRoom({
     const initial = (otherUser?.firstName?.[0] || 'P').toUpperCase();
 
     return (
-      <View style={[styles.chatHeader, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.chatHeader, { paddingTop: insets.top + 5 }]}>
         {onBack && (
           <IconButton
             icon="chevron-left"
@@ -631,16 +673,16 @@ function ChatRoom({
 
   // Calculate content padding - adjust based on keyboard state
   const contentPaddingBottom = useMemo(() => {
-    // When keyboard is open: minimal spacing (input sits right above keyboard)
-    // When keyboard is closed: normal spacing (input at bottom)
+    const basePadding = INPUT_BAR_HEIGHT + insets.bottom + 12;
+
     if (keyboardHeight > 0) {
-      // Keyboard open - minimal spacing between input and keyboard
-      return 60; // Just enough for input bar + small buffer
-    } else {
-      // Keyboard closed - normal spacing at bottom
-      return 80; // More space when keyboard is closed
+      // Keyboard open - add keyboard height so bubbles stay above it.
+      return keyboardHeight + basePadding;
     }
-  }, [keyboardHeight]);
+
+    // Keyboard closed - normal spacing at bottom
+    return basePadding + 12;
+  }, [keyboardHeight, insets.bottom]);
 
   return (
     <View style={styles.chatContainer}>
@@ -666,6 +708,11 @@ function ChatRoom({
                 }
               ]}
               style={styles.messagesList}
+              onContentSizeChange={() => {
+                if (keyboardHeight > 0 && isInputFocused) {
+                  scrollToBottom(false, true);
+                }
+              }}
               onScroll={handleScroll}
               onScrollBeginDrag={handleScrollBeginDrag}
               onScrollEndDrag={handleScrollEndDrag}
@@ -782,15 +829,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingBottom: 2,
     backgroundColor: theme.colors.primary,
   },
   headerBackButton: {
-    margin: -8,
+    marginLeft: -8,
+    marginRight: 10,
+    transform: [{ translateX: -2 }, { translateY: -10 }],
   },
   headerAvatar: {
     marginRight: 12,
     backgroundColor: theme.colors.onPrimary,
+    transform: [{ translateY: -10 }],
   },
   headerAvatarText: {
     backgroundColor: theme.colors.onPrimary,
@@ -798,6 +848,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   headerInfo: {
     flex: 1,
     marginRight: 8,
+    transform: [{ translateY: -10 }],
   },
   headerName: {
     fontSize: 16,
@@ -813,6 +864,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   headerIcons: {
     flexDirection: 'row',
     alignItems: 'center',
+    transform: [{ translateY: -10 }],
   },
   headerIcon: {
     padding: 8,
@@ -821,6 +873,17 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   messagesContent: {
     paddingHorizontal: 16,
     paddingTop: 16,
+  },
+  messageContent: {
+    maxWidth: '100%',
+    flexShrink: 1,
+    flexGrow: 1,
+  },
+  otherMessageContent: {
+    marginTop: 0,
+  },
+  otherMessageContentIndented: {
+    marginLeft: 40,
   },
   messageContainer: {
     flexDirection: 'row',
@@ -835,6 +898,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   otherMessage: {
     justifyContent: 'flex-start',
+    alignItems: 'flex-start',
   },
   messageAvatar: {
     marginRight: 8,
