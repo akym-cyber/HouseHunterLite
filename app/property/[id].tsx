@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,52 +13,84 @@ import {
   Card,
   Title,
   Button,
+  TextInput,
   Chip,
   Divider,
   IconButton,
   FAB,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useFavorites } from '../../src/hooks/useFavorites';
 import { useMessages } from '../../src/hooks/useMessages';
+import { useApplications } from '../../src/hooks/useApplications';
+import { applicationHelpers, propertyHelpers } from '../../src/services/firebase/firebaseHelpers';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
-import Video from 'react-native-video';
+import { Video, ResizeMode } from 'expo-av';
 
 const { width } = Dimensions.get('window');
+const mediaWidth = Math.max(0, width - 32);
+const mediaHeight = Math.round(mediaWidth * 4 / 3);
 
 export default function PropertyDetailsScreen() {
+  const { theme } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
-  const { getPropertyById, deleteProperty } = useProperties();
+  const { properties, loading: propertiesLoading, refreshProperties, deleteProperty } = useProperties();
   const { isFavorite, toggleFavorite } = useFavorites();
-  const { findConversationByProperty, createConversation } = useMessages();
-  const [property, setProperty] = useState<Property | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { findConversationByOwner, createConversation } = useMessages();
+  const { applications } = useApplications('tenant');
+  const [fetchedProperty, setFetchedProperty] = useState<Property | null>(null);
+  const [fetchByIdError, setFetchByIdError] = useState<string | null>(null);
+  const [isFetchingById, setIsFetchingById] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [applyVisible, setApplyVisible] = useState(false);
+  const [applyMessage, setApplyMessage] = useState('');
+  const [applySubmitting, setApplySubmitting] = useState(false);
+
+  const propertyId = Array.isArray(id) ? id[0] : id;
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const propertyFromList = useMemo(
+    () => properties.find((item) => item.id === propertyId) || null,
+    [properties, propertyId]
+  );
+  const property = propertyFromList ?? fetchedProperty;
+  const existingApplication = useMemo(() => {
+    if (!user || !property) return null;
+    return applications.find(app => app.propertyId === property.id && app.tenantId === user.uid) || null;
+  }, [applications, property, user]);
+  const hasApplied = !!existingApplication;
 
   useEffect(() => {
-    if (id) {
-      fetchProperty();
-    }
-  }, [id]);
+    if (!propertyId || propertyId === 'undefined' || propertyId === 'null') return;
+    if (propertyFromList) return;
+    if (propertiesLoading) return;
+    if (isFetchingById) return;
+    if (fetchedProperty && fetchedProperty.id === propertyId) return;
 
-  const fetchProperty = async () => {
-    if (!id) return;
+    setIsFetchingById(true);
+    setFetchByIdError(null);
 
-    setLoading(true);
-    const result = await getPropertyById(id);
-
-    if (result.success && result.data) {
-      setProperty(result.data);
-    } else {
-      Alert.alert('Error', 'Failed to load property details');
-    }
-    setLoading(false);
-  };
+    propertyHelpers.getPropertyById(propertyId)
+      .then((result) => {
+        if (result.data) {
+          setFetchedProperty(result.data);
+        } else {
+          setFetchByIdError(result.error || 'Property not found');
+        }
+      })
+      .catch(() => {
+        setFetchByIdError('Failed to load property details');
+      })
+      .finally(() => {
+        setIsFetchingById(false);
+      });
+  }, [propertyId, propertyFromList, propertiesLoading, isFetchingById, fetchedProperty]);
 
   const handleContactOwner = async () => {
     if (!user) {
@@ -75,8 +107,8 @@ export default function PropertyDetailsScreen() {
     }
 
     try {
-      // First, try to find an existing conversation for this property and owner
-      const findResult = await findConversationByProperty(property.id, property.ownerId);
+      // First, try to find an existing conversation for this owner
+      const findResult = await findConversationByOwner(property.ownerId, property.ownerId);
 
       if (findResult.success && findResult.data) {
         // Conversation exists, navigate to it
@@ -105,8 +137,63 @@ export default function PropertyDetailsScreen() {
       return;
     }
 
-    // TODO: Navigate to scheduling screen
-    Alert.alert('Coming Soon', 'Viewing scheduling will be available soon!');
+    if (!property) return;
+    router.push({
+      pathname: '/schedule-viewing/[propertyId]',
+      params: { propertyId: property.id }
+    });
+  };
+
+  const handleOpenApply = () => {
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to apply');
+      return;
+    }
+    if (!property) return;
+    if (user.uid === property.ownerId) {
+      Alert.alert('Error', 'You cannot apply to your own property');
+      return;
+    }
+    if (hasApplied) {
+      Alert.alert('Already applied', 'You have already applied for this property.');
+      return;
+    }
+    setApplyVisible(true);
+  };
+
+  const handleSubmitApplication = async () => {
+    if (!user || !property) return;
+    setApplySubmitting(true);
+    try {
+      const existing = applications.find(app => app.propertyId === property.id && app.tenantId === user.uid);
+      if (existing) {
+        Alert.alert('Already applied', 'You have already applied for this property.');
+        setApplySubmitting(false);
+        setApplyVisible(false);
+        return;
+      }
+
+      const result = await applicationHelpers.createApplication({
+        propertyId: property.id,
+        tenantId: user.uid,
+        ownerId: property.ownerId,
+        message: applyMessage.trim(),
+        status: 'pending',
+      });
+
+      if (result.error) {
+        Alert.alert('Error', result.error || 'Failed to submit application');
+        return;
+      }
+
+      Alert.alert('Application sent', 'Your application has been submitted.');
+      setApplyVisible(false);
+      setApplyMessage('');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to submit application');
+    } finally {
+      setApplySubmitting(false);
+    }
   };
 
   const handleToggleFavorite = async () => {
@@ -288,7 +375,7 @@ export default function PropertyDetailsScreen() {
     }
   };
 
-  if (loading) {
+  if ((propertiesLoading || isFetchingById) && !property) {
     return (
       <View style={styles.loadingContainer}>
         <Text>Loading property details...</Text>
@@ -299,30 +386,15 @@ export default function PropertyDetailsScreen() {
   if (!property) {
     return (
       <View style={styles.errorContainer}>
-        <Text>Property not found</Text>
+        <Text>{fetchByIdError || 'Property not found'}</Text>
+        <Button mode="outlined" onPress={refreshProperties} style={{ marginTop: 12 }}>
+          Retry
+        </Button>
       </View>
     );
   }
 
-  // DEBUG LOGGING - Add this to check if property data is loading
-  console.log("🔍 Property Details - property object:", property);
-  console.log("🔍 Property Details - is property null?", !property);
-  console.log("🔍 Property Details - property keys:", property ? Object.keys(property) : "NULL");
-  console.log("🔍 Property Details - specific fields:", {
-    propertyType: property.propertyType,
-    bedrooms: property.bedrooms,
-    bathrooms: property.bathrooms,
-    squareFeet: property.squareFeet
-  });
-
-
-
   const isOwner = user?.uid === property.ownerId;
-
-  // DEBUG: Check ownership
-  console.log('[PropertyDetail] User ID:', user?.uid);
-  console.log('[PropertyDetail] Property Owner ID:', property.ownerId);
-  console.log('[PropertyDetail] Is Owner:', isOwner);
 
   return (
     <View style={styles.container}>
@@ -330,7 +402,7 @@ export default function PropertyDetailsScreen() {
       <View style={styles.header}>
         <IconButton
           icon="chevron-left"
-          iconColor={defaultTheme.colors.onPrimary}
+          iconColor={theme.colors.onPrimary}
           size={28}
           onPress={() => router.back()}
           style={styles.headerBackButton}
@@ -345,20 +417,31 @@ export default function PropertyDetailsScreen() {
           <View style={styles.imageContainer}>
           {property.primaryImageUrl || property.media?.length ? (
             property.media && property.media.length > 0 ? (
-              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={mediaWidth}
+                snapToAlignment="start"
+                decelerationRate="fast"
+                style={{ width: mediaWidth }}
+              >
                 {property.media.map((m, idx) => (
-                  <View key={idx} style={{ width }}>
+                  <View key={idx} style={{ width: mediaWidth }}>
                     {m.type === 'image' ? (
-                      <Card.Cover source={{ uri: m.url }} style={styles.mainImage} />
+                      <Card.Cover
+                        source={{ uri: m.url }}
+                        style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
+                        resizeMode="cover"
+                      />
                     ) : (
                       <Video
                         source={{ uri: m.url }}
-                        style={styles.mainImage}
-                        resizeMode="cover"
-                        controls={true}
-                        paused={false}
-                        muted={false}
-                        repeat={false}
+                        style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
+                        resizeMode={ResizeMode.COVER}
+                        useNativeControls
+                        shouldPlay
+                        isMuted={false}
                         onError={(error) => console.log('Video error:', error)}
                       />
                     )}
@@ -366,17 +449,18 @@ export default function PropertyDetailsScreen() {
                 ))}
               </ScrollView>
             ) : (
-              <Card.Cover source={{ uri: property.primaryImageUrl! }} style={styles.mainImage} />
+              <Card.Cover
+                source={{ uri: property.primaryImageUrl! }}
+                style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
+                resizeMode="cover"
+              />
             )
           ) : (
-            <Card.Cover
-              source={{ uri: 'https://via.placeholder.com/400x300?text=Property+Image' }}
-              style={styles.mainImage}
-            />
+            <View style={[styles.imagePlaceholder, { width: mediaWidth, height: mediaHeight }]} />
           )}
           <IconButton
             icon={isFavorite(property.id) ? 'heart' : 'heart-outline'}
-            iconColor={isFavorite(property.id) ? 'red' : 'white'}
+            iconColor={isFavorite(property.id) ? theme.app.favoriteActive : theme.app.iconOnDark}
             size={30}
             style={styles.favoriteButton}
             onPress={handleToggleFavorite}
@@ -521,7 +605,7 @@ export default function PropertyDetailsScreen() {
                 onPress={handleDeleteProperty}
                 style={[styles.actionButton, styles.deleteButton]}
                 icon="delete"
-                textColor="#d32f2f"
+                textColor={theme.colors.error}
                 disabled={isDeleting}
                 loading={isDeleting}
               >
@@ -532,11 +616,13 @@ export default function PropertyDetailsScreen() {
             <>
               <Button
                 mode="contained"
-                onPress={handleContactOwner}
+                onPress={handleOpenApply}
                 style={styles.actionButton}
-                icon="message"
+                icon="file-document"
+                disabled={applySubmitting || hasApplied}
+                loading={applySubmitting}
               >
-                Contact Owner
+                {hasApplied ? 'Application Submitted' : 'Apply Now'}
               </Button>
               <Button
                 mode="outlined"
@@ -546,19 +632,48 @@ export default function PropertyDetailsScreen() {
               >
                 Schedule Viewing
               </Button>
+              <Button
+                mode="outlined"
+                onPress={handleContactOwner}
+                style={styles.actionButton}
+                icon="message"
+              >
+                Contact Owner
+              </Button>
             </>
           )}
         </View>
         </SafeAreaView>
+
+        <Portal>
+          <Dialog visible={applyVisible} onDismiss={() => setApplyVisible(false)}>
+            <Dialog.Title>Apply for this property</Dialog.Title>
+            <Dialog.Content>
+              <TextInput
+                label="Message (optional)"
+                value={applyMessage}
+                onChangeText={setApplyMessage}
+                mode="outlined"
+                multiline
+              />
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={() => setApplyVisible(false)}>Cancel</Button>
+              <Button onPress={handleSubmitApplication} loading={applySubmitting}>
+                Submit
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
       </SafeAreaView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   header: {
     flexDirection: 'row',
@@ -566,13 +681,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerBackButton: {
     margin: -8,
   },
   headerTitle: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -590,6 +705,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: theme.app.background,
   },
   errorContainer: {
     flex: 1,
@@ -601,16 +717,22 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     position: 'relative',
+    alignItems: 'center',
+    paddingHorizontal: 0,
+  },
+  imagePlaceholder: {
+    backgroundColor: theme.app.background,
+    borderRadius: 8,
   },
   mainImage: {
-    height: 250,
-    width: width,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   favoriteButton: {
     position: 'absolute',
     top: 10,
     right: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: theme.app.overlayMedium,
   },
   card: {
     margin: 16,
@@ -624,17 +746,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   propertyLocation: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 8,
   },
   propertyPrice: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     marginBottom: 4,
   },
   propertyDeposit: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontSize: 16,
   },
   sectionTitle: {
@@ -653,7 +775,7 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 4,
   },
   detailValue: {
@@ -678,7 +800,7 @@ const styles = StyleSheet.create({
   },
   description: {
     lineHeight: 20,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   availabilityStatus: {
     fontSize: 16,
@@ -686,24 +808,24 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   availableDate: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   actionContainer: {
     padding: 16,
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: defaultTheme.colors.outline,
+    borderTopColor: theme.colors.outline,
   },
   actionButton: {
     marginBottom: 8,
   },
   deleteButton: {
-    borderColor: defaultTheme.colors.error,
+    borderColor: theme.colors.error,
   },
   safeAreaContainer: {
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: defaultTheme.colors.outline,
+    borderTopColor: theme.colors.outline,
   },
 });
 

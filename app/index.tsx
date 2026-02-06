@@ -1,18 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import { Redirect } from 'expo-router';
 import { useAuth } from '../src/hooks/useAuth';
-import { defaultTheme } from '../src/styles/theme';
+import { useTheme } from '../src/theme/useTheme';
 
 export default function Index() {
+  const { theme } = useTheme();
   const { user, loading } = useAuth();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Show loading screen while checking authentication
   if (loading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+        <ActivityIndicator size="large" color={theme.colors.primary} />
         <Text style={styles.loadingText}>Loading HouseHunter...</Text>
       </View>
     );
@@ -26,16 +28,16 @@ export default function Index() {
   }
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: defaultTheme.colors.onBackground,
+    color: theme.colors.onBackground,
   },
 }); 

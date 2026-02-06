@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef, useEffect } from 'react';
+import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -23,7 +23,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 import { Message, MessageMedia } from '../../types/database';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -64,6 +64,8 @@ interface ChatInputBarProps {
   isFocused?: boolean;
   onFocus?: () => void;
   onBlur?: () => void;
+  inputAccessoryViewID?: string;
+  inputRef?: React.RefObject<TextInput>;
 }
 
 function ChatInputBar({
@@ -77,7 +79,11 @@ function ChatInputBar({
   isFocused = false,
   onFocus,
   onBlur,
+  inputAccessoryViewID,
+  inputRef,
 }: ChatInputBarProps) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   // State management
   const [isLoading, setIsLoading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -92,7 +98,7 @@ function ChatInputBar({
   const recordingRef = useRef<any>(null);
   const recordingTimerRef = useRef<number | null>(null);
   const panResponderRef = useRef<any>(null);
-  const textInputRef = useRef<TextInput | null>(null);
+  const textInputRef = inputRef ?? useRef<TextInput | null>(null);
 
   // Animation values
   const recordButtonScale = useRef(new Animated.Value(1)).current;
@@ -547,7 +553,7 @@ function ChatInputBar({
           <Ionicons
             name="camera-outline"
             size={20}
-            color={isLoading ? defaultTheme.colors.onSurfaceVariant : defaultTheme.colors.onSurfaceVariant}
+            color={isLoading ? theme.colors.onSurfaceVariant : theme.colors.onSurfaceVariant}
           />
         </TouchableOpacity>
 
@@ -557,9 +563,10 @@ function ChatInputBar({
           style={[styles.textInput, { height: inputHeight}]}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={defaultTheme.colors.onSurfaceVariant}
+          placeholderTextColor={theme.colors.onSurfaceVariant}
           multiline
           blurOnSubmit={false}
+          inputAccessoryViewID={Platform.OS === 'ios' ? inputAccessoryViewID : undefined}
           onFocus={() => {
             setIsKeyboardVisible(true);
             onFocus?.();
@@ -583,7 +590,7 @@ function ChatInputBar({
               <Ionicons
                 name="attach-outline"
                 size={20}
-                color={defaultTheme.colors.onSurfaceVariant}
+                color={theme.colors.onSurfaceVariant}
               />
             </TouchableOpacity>
 
@@ -594,7 +601,7 @@ function ChatInputBar({
               <Ionicons
                 name="happy-outline"
                 size={20}
-                color={defaultTheme.colors.onSurfaceVariant}
+                color={theme.colors.onSurfaceVariant}
               />
             </TouchableOpacity>
           </Animated.View>
@@ -622,8 +629,8 @@ function ChatInputBar({
                 backgroundColor: isRecording
                   ? '#ff4444'
                   : hasText
-                    ? defaultTheme.colors.primary
-                    : defaultTheme.colors.secondary,
+                    ? theme.colors.primary
+                    : theme.colors.secondary,
               }
             ]}
             onPress={handleSendPress}
@@ -632,7 +639,7 @@ function ChatInputBar({
             <Ionicons
               name={hasText ? "paper-plane" : "mic"}
               size={18}
-              color={hasText ? defaultTheme.colors.onPrimary : defaultTheme.colors.onSurface}
+              color={hasText ? theme.colors.onPrimary : theme.colors.onSurface}
               style={hasText ? { transform: [{ rotate: '45deg' }] } : null}
             />
           </TouchableOpacity>
@@ -673,11 +680,11 @@ function ChatInputBar({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   inputContainer: {
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: defaultTheme.colors.outline,
+    borderTopColor: theme.colors.outline,
     paddingHorizontal: 12,
     paddingTop: 6,
     paddingBottom: Platform.select({ ios: 6, android: 8 }),
@@ -705,10 +712,10 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: defaultTheme.colors.outline,
+    borderColor: theme.colors.outline,
     paddingLeft: 8,
     paddingRight: 6,
     paddingVertical: 4,
@@ -721,7 +728,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   inputWrapperFocused: {
-    borderColor: defaultTheme.colors.primary,
+    borderColor: theme.colors.primary,
     borderWidth: 1.5,
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -735,7 +742,7 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     fontSize: 16,
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
     paddingVertical: Platform.select({ ios: 6, android: 4 }),
     paddingHorizontal: 6,
     maxHeight: 88,

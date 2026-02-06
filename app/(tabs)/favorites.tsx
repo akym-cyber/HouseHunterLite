@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   RefreshControl,
   Image,
+  TouchableOpacity,
 } from 'react-native';
 import {
   Text,
@@ -16,10 +17,11 @@ import {
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useFavorites } from '../../src/hooks/useFavorites';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
+import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
 
 const getLocationString = (item: Property) => {
   // Show Kenyan location hierarchy: Estate, County, Kenya
@@ -34,24 +36,11 @@ const getLocationString = (item: Property) => {
   }
 };
 
-const getImageSource = (item: Property) => {
-  // Use actual property image if available
-  if (item.primaryImageUrl) {
-    return { uri: item.primaryImageUrl };
-  }
-  if (item.media && item.media.length > 0) {
-    const primaryMedia = item.media.find(m => m.isPrimary) || item.media[0];
-    if (primaryMedia && primaryMedia.type === 'image') {
-      return { uri: primaryMedia.url };
-    }
-  }
-  // Fallback to placeholder
-  return { uri: 'https://via.placeholder.com/300x200?text=Property+Image' };
-};
-
 export default function FavoritesScreen() {
+  const { theme } = useTheme();
   const { favorites, loading, error, refreshFavorites } = useFavorites();
   const [refreshing, setRefreshing] = useState(false);
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -62,13 +51,17 @@ export default function FavoritesScreen() {
   const renderPropertyCard = ({ item }: { item: Property }) => (
     <Card
       style={styles.propertyCard}
-      onPress={() => router.push(`/property/${item.id}`)}
     >
-      <Card.Cover
-        source={getImageSource(item)}
-        style={styles.propertyImage}
+      <PropertyMediaCarousel
+        primaryImageUrl={item.primaryImageUrl}
+        media={item.media}
+        borderRadius={8}
       />
-      <Card.Content style={styles.propertyContent}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push(`/property/${item.id}`)}
+      >
+        <Card.Content style={styles.propertyContent}>
         <Title style={styles.propertyTitle} numberOfLines={1}>
           {item.title}
         </Title>
@@ -92,6 +85,7 @@ export default function FavoritesScreen() {
           )}
         </View>
       </Card.Content>
+      </TouchableOpacity>
     </Card>
   );
 
@@ -149,18 +143,18 @@ export default function FavoritesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   header: {
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerTitle: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -176,11 +170,6 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderRadius: 8,
   },
-  propertyImage: {
-    height: 150,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-  },
   propertyContent: {
     padding: 16,
   },
@@ -190,13 +179,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   propertyLocation: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 4,
   },
   propertyPrice: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     marginBottom: 8,
   },
   propertyDetails: {
@@ -221,7 +210,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   emptyButton: {
     marginTop: 16,
@@ -230,3 +219,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+
+
+

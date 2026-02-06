@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,15 +18,30 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { useLocalSearchParams, router } from 'expo-router';
-import { defaultTheme } from '../../../src/styles/theme';
+import { useTheme } from '../../../src/theme/useTheme';
 import { useProperties } from '../../../src/hooks/useProperties';
 import { useAuth } from '../../../src/hooks/useAuth';
 import { PROPERTY_TYPES, AMENITIES, VALIDATION_RULES } from '../../../src/utils/constants';
-import { Property, PropertyMedia } from '../../../src/types/database';
+import { Property, PropertyMedia, WeekdayKey, ViewingTimeSlotRange } from '../../../src/types/database';
 import ImageUpload from '../../../src/components/property/ImageUpload';
 import { MediaFile, cloudinaryService } from '../../../src/services/firebase/storage';
+import {
+  DEFAULT_VIEWING_DAYS,
+  DEFAULT_VIEWING_TIME_RANGES,
+  WEEKDAY_OPTIONS,
+  WEEKDAY_KEY_BY_INDEX,
+  normalizeViewingTimeSlots,
+} from '../../../src/utils/viewingDefaults';
+import BlockedDatePicker from '../../../src/components/viewings/BlockedDatePicker';
+import TimeSlotBuilder from '../../../src/components/viewings/TimeSlotBuilder';
+
+const mapDaysToKeys = (days: number[]): WeekdayKey[] =>
+  days
+    .map((day) => WEEKDAY_KEY_BY_INDEX[day])
+    .filter((key): key is WeekdayKey => !!key);
 
 export default function EditPropertyScreen() {
+  const { theme } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const { getPropertyById, updateProperty, deleteProperty } = useProperties();
@@ -37,6 +52,7 @@ export default function EditPropertyScreen() {
   const [fileProgress, setFileProgress] = useState<Record<string, number>>({});
   const [media, setMedia] = useState<MediaFile[]>([]);
   const [existingMedia, setExistingMedia] = useState<PropertyMedia[]>([]);
+  const [blockedPickerVisible, setBlockedPickerVisible] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -56,8 +72,15 @@ export default function EditPropertyScreen() {
     parkingAvailable: false,
     utilitiesIncluded: false,
     amenities: [] as string[],
+    viewingDays: DEFAULT_VIEWING_DAYS as number[],
+    viewingTimeSlots: normalizeViewingTimeSlots(
+      DEFAULT_VIEWING_TIME_RANGES,
+      mapDaysToKeys(DEFAULT_VIEWING_DAYS)
+    ) as ViewingTimeSlotRange[],
+    blockedDates: [] as string[],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   useEffect(() => {
     if (id) {
@@ -92,6 +115,14 @@ export default function EditPropertyScreen() {
         parkingAvailable: property.parkingAvailable || false,
         utilitiesIncluded: property.utilitiesIncluded || false,
         amenities: property.amenities || [],
+        viewingDays: property.viewingDays && property.viewingDays.length > 0 ? property.viewingDays : DEFAULT_VIEWING_DAYS,
+        viewingTimeSlots: normalizeViewingTimeSlots(
+          property.viewingTimeSlots && property.viewingTimeSlots.length > 0
+            ? property.viewingTimeSlots
+            : DEFAULT_VIEWING_TIME_RANGES,
+          mapDaysToKeys(property.viewingDays && property.viewingDays.length > 0 ? property.viewingDays : DEFAULT_VIEWING_DAYS)
+        ),
+        blockedDates: property.blockedDates || [],
       });
       setExistingMedia(property.media || []);
     } else {
@@ -159,6 +190,56 @@ export default function EditPropertyScreen() {
     }));
   };
 
+  const normalizeSlotsForDays = (
+    slots: ViewingTimeSlotRange[],
+    nextDays: number[]
+  ): ViewingTimeSlotRange[] => {
+    const allowedKeys = mapDaysToKeys(nextDays);
+    if (allowedKeys.length === 0) return slots;
+    return slots
+      .map((slot) => {
+        const slotDays = slot.days && slot.days.length > 0 ? slot.days : allowedKeys;
+        const filtered = slotDays.filter((key) => allowedKeys.includes(key));
+        if (filtered.length === 0) return null;
+        return { ...slot, days: filtered };
+      })
+      .filter((slot): slot is ViewingTimeSlotRange => slot !== null);
+  };
+
+  const handleViewingDayToggle = (day: number) => {
+    setFormData(prev => {
+      const nextDays = prev.viewingDays.includes(day)
+        ? prev.viewingDays.filter(d => d !== day)
+        : [...prev.viewingDays, day];
+      return {
+        ...prev,
+        viewingDays: nextDays,
+        viewingTimeSlots: normalizeSlotsForDays(prev.viewingTimeSlots, nextDays),
+      };
+    });
+  };
+
+  const handleApplyBlockedDates = (dates: string[]) => {
+    setFormData(prev => ({
+      ...prev,
+      blockedDates: dates.slice().sort()
+    }));
+  };
+
+  const handleTimeSlotsChange = (slots: ViewingTimeSlotRange[]) => {
+    setFormData(prev => ({
+      ...prev,
+      viewingTimeSlots: slots,
+    }));
+  };
+
+  const handleRemoveBlockedDate = (dateKey: string) => {
+    setFormData(prev => ({
+      ...prev,
+      blockedDates: prev.blockedDates.filter(d => d !== dateKey)
+    }));
+  };
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
@@ -211,6 +292,9 @@ export default function EditPropertyScreen() {
         ...(formData.deposit?.trim() ? { deposit: parseFloat(formData.deposit.trim()) } : {}),
         ...(formData.squareFeet?.trim() ? { squareFeet: parseInt(formData.squareFeet.trim()) } : {}),
         ...(formData.amenities.length > 0 ? { amenities: formData.amenities } : {}),
+        viewingDays: formData.viewingDays,
+        viewingTimeSlots: formData.viewingTimeSlots,
+        blockedDates: formData.blockedDates,
         updatedAt: new Date().toISOString(),
       };
 
@@ -306,7 +390,7 @@ export default function EditPropertyScreen() {
         <View style={styles.header}>
           <IconButton
             icon="chevron-left"
-            iconColor={defaultTheme.colors.onPrimary}
+            iconColor={theme.colors.onPrimary}
             size={28}
             onPress={() => router.back()}
             style={styles.headerBackButton}
@@ -329,7 +413,7 @@ export default function EditPropertyScreen() {
       <View style={styles.header}>
         <IconButton
           icon="chevron-left"
-          iconColor={defaultTheme.colors.onPrimary}
+          iconColor={theme.colors.onPrimary}
           size={28}
           onPress={() => router.back()}
           style={styles.headerBackButton}
@@ -574,6 +658,56 @@ export default function EditPropertyScreen() {
 
         <Card style={styles.card}>
           <Card.Content>
+            <Title style={styles.sectionTitle}>Viewing Availability</Title>
+            <Text style={styles.subSectionTitle}>Available Days</Text>
+            <View style={styles.featuresContainer}>
+              {WEEKDAY_OPTIONS.map((day) => (
+                <Chip
+                  key={day.value}
+                  selected={formData.viewingDays.includes(day.value)}
+                  onPress={() => handleViewingDayToggle(day.value)}
+                  style={styles.featureChip}
+                >
+                  {day.label}
+                </Chip>
+              ))}
+            </View>
+            <Text style={styles.subSectionTitle}>Time Slots</Text>
+            <TimeSlotBuilder
+              slots={formData.viewingTimeSlots}
+              onChange={handleTimeSlotsChange}
+              availableDays={formData.viewingDays}
+            />
+            <Text style={styles.subSectionTitle}>Blocked Dates</Text>
+            <Button
+              mode="outlined"
+              onPress={() => setBlockedPickerVisible(true)}
+              style={styles.blockedButton}
+            >
+              Choose Blocked Dates
+            </Button>
+            <View style={styles.featuresContainer}>
+              {formData.blockedDates.map((date) => (
+                <Chip
+                  key={date}
+                  onPress={() => handleRemoveBlockedDate(date)}
+                  style={styles.featureChip}
+                >
+                  {date}
+                </Chip>
+              ))}
+            </View>
+            <BlockedDatePicker
+              visible={blockedPickerVisible}
+              blockedDates={formData.blockedDates}
+              onDismiss={() => setBlockedPickerVisible(false)}
+              onConfirm={handleApplyBlockedDates}
+            />
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.card}>
+          <Card.Content>
             <Title style={styles.sectionTitle}>Amenities</Title>
             <View style={styles.amenitiesContainer}>
               {AMENITIES.map((amenity) => (
@@ -623,7 +757,7 @@ export default function EditPropertyScreen() {
               onPress={handleDeleteProperty}
               style={[styles.actionButton, styles.deleteButton]}
               icon="delete"
-              textColor="#d32f2f"
+              textColor={theme.colors.error}
               disabled={isDeleting}
               loading={isDeleting}
             >
@@ -636,10 +770,10 @@ export default function EditPropertyScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   header: {
     flexDirection: 'row',
@@ -647,13 +781,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerBackButton: {
     margin: -8,
   },
   headerTitle: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -685,6 +819,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
+  },
+  subSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: theme.colors.onSurfaceVariant,
+  },
+  blockedButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 12,
   },
   input: {
     marginBottom: 8,
@@ -719,11 +863,11 @@ const styles = StyleSheet.create({
   progressText: {
     textAlign: 'center',
     marginTop: 8,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   existingMediaCard: {
     marginTop: 16,
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
   },
   existingMediaTitle: {
     fontSize: 16,
@@ -732,23 +876,23 @@ const styles = StyleSheet.create({
   },
   existingMediaText: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   actionContainer: {
     padding: 16,
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: defaultTheme.colors.outline,
+    borderTopColor: theme.colors.outline,
   },
   actionButton: {
     marginBottom: 8,
   },
   deleteButton: {
-    borderColor: defaultTheme.colors.error,
+    borderColor: theme.colors.error,
   },
   safeAreaContainer: {
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: defaultTheme.colors.outline,
+    borderTopColor: theme.colors.outline,
   },
 });

@@ -1,14 +1,15 @@
 import React from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { IconButton } from 'react-native-paper';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 
 export default function PropertyLayout() {
   const router = useRouter();
+  const { theme } = useTheme();
   const backButton = () => (
     <IconButton
       icon="chevron-left"
-      iconColor={defaultTheme.colors.onPrimary}
+      iconColor={theme.colors.onPrimary}
       size={28}
       onPress={() => router.back()}
       style={{ margin: -8 }}
@@ -20,9 +21,9 @@ export default function PropertyLayout() {
       screenOptions={{
         headerShown: true,
         headerStyle: {
-          backgroundColor: defaultTheme.colors.primary,
+          backgroundColor: theme.colors.primary,
         },
-        headerTintColor: defaultTheme.colors.onPrimary,
+        headerTintColor: theme.colors.onPrimary,
         headerTitleStyle: {
           fontWeight: 'bold',
         },

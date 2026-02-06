@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { TouchableOpacity, Text, Animated, StyleSheet, Platform } from 'react-native';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface NewMessageHintProps {
   count: number;
@@ -9,6 +9,8 @@ interface NewMessageHintProps {
 }
 
 const NewMessageHint: React.FC<NewMessageHintProps> = ({ count, onPress, visible }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -94,7 +96,7 @@ const NewMessageHint: React.FC<NewMessageHintProps> = ({ count, onPress, visible
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     position: 'absolute',
     bottom: Platform.select({
@@ -106,7 +108,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   hintButton: {
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -115,7 +117,7 @@ const styles = StyleSheet.create({
     // Subtle shadow for floating effect
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 4,
@@ -127,13 +129,13 @@ const styles = StyleSheet.create({
     }),
   },
   hintText: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 12,
     fontWeight: '600',
     marginRight: 4,
   },
   hintIcon: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },

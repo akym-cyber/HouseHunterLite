@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
 import {
   Text,
@@ -18,10 +19,11 @@ import {
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PROPERTY_TYPES, BEDROOM_OPTIONS, PRICE_RANGES, formatPrice } from '../../src/utils/constants';
 import { Property } from '../../src/types/database';
+import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
 
 const getLocationString = (item: Property) => {
   // Show Kenyan location hierarchy: Estate, County, Kenya
@@ -37,6 +39,7 @@ const getLocationString = (item: Property) => {
 };
 
 export default function SearchScreen() {
+  const { theme } = useTheme();
   const { properties, loading, searchProperties } = useProperties();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -68,17 +71,23 @@ export default function SearchScreen() {
     router.push(`/property/${propertyId}`);
   };
 
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const renderPropertyCard = ({ item }: { item: Property }) => (
     <Card
       key={item.id}
       style={styles.propertyCard}
-      onPress={() => handlePropertyPress(item.id)}
     >
-      <Card.Cover
-        source={{ uri: 'https://via.placeholder.com/300x200?text=Property+Image' }}
-        style={styles.propertyImage}
+      <PropertyMediaCarousel
+        primaryImageUrl={item.primaryImageUrl}
+        media={item.media}
+        borderRadius={8}
       />
-      <Card.Content style={styles.propertyContent}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => handlePropertyPress(item.id)}
+      >
+        <Card.Content style={styles.propertyContent}>
         <Title style={styles.propertyTitle} numberOfLines={1}>
           {item.title}
         </Title>
@@ -102,6 +111,7 @@ export default function SearchScreen() {
           )}
         </View>
       </Card.Content>
+      </TouchableOpacity>
     </Card>
   );
 
@@ -273,10 +283,10 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   scrollView: {
     flex: 1,
@@ -291,10 +301,10 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerTitle: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -330,7 +340,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   chipContainer: {
     flexDirection: 'row',
@@ -361,11 +371,6 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderRadius: 8,
   },
-  propertyImage: {
-    height: 150,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-  },
   propertyContent: {
     padding: 16,
   },
@@ -375,13 +380,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   propertyLocation: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 4,
   },
   propertyPrice: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     marginBottom: 8,
   },
   propertyDetails: {
@@ -406,13 +411,17 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   fab: {
     position: 'absolute',
     margin: 16,
     right: 0,
     bottom: 0,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
 });
+
+
+
+

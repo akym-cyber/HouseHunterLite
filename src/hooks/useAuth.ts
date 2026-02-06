@@ -12,7 +12,8 @@ import {
   updateProfile,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { AppState } from 'react-native';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase/firebaseConfig';
 import { userHelpers } from '../services/firebase/firebaseHelpers';
@@ -79,6 +80,55 @@ export const useAuth = () => {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    let isMounted = true;
+    let heartbeat: NodeJS.Timeout | null = null;
+
+    const updatePresence = async (isOnline: boolean) => {
+      try {
+        await setDoc(
+          doc(db, 'users', user.uid),
+          {
+            isOnline,
+            lastSeen: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch {
+        // ignore presence write failures (offline, permissions, etc.)
+      }
+    };
+
+    const handleAppState = (state: string) => {
+      if (!isMounted) return;
+      if (state === 'active') {
+        updatePresence(true);
+      } else {
+        updatePresence(false);
+      }
+    };
+
+    // Mark online immediately and start heartbeat
+    updatePresence(true);
+    heartbeat = setInterval(() => {
+      updatePresence(true);
+    }, 60000);
+
+    const sub = AppState.addEventListener('change', handleAppState);
+
+    return () => {
+      isMounted = false;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+      }
+      sub.remove();
+      updatePresence(false);
+    };
+  }, [user?.uid]);
+
   const signIn = async (email: string, password: string): Promise<AuthResult> => {
     try {
       setLoading(true);
@@ -133,6 +183,7 @@ export const useAuth = () => {
         email: result.user.email,
         photoURL: result.user.photoURL || null,
         role: userData.role || 'tenant',
+        shareContactInfo: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -144,6 +195,7 @@ export const useAuth = () => {
         lastName: userData.lastName,
         phone: userData.phone,
         role: userData.role || 'tenant',
+        shareContactInfo: true,
         isVerified: false,
         isActive: true
       });

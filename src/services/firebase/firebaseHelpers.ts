@@ -10,12 +10,13 @@ import {
   orderBy, 
   limit,
   serverTimestamp,
+  Timestamp,
   DocumentData,
   QueryDocumentSnapshot,
   getDoc
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
-import { Property, User, Favorite } from '../../types/database';
+import { Property, User, Favorite, Viewing, Application, Payment, Document, SavedProperty } from '../../types/database';
 
 // Timeout helper
 const withTimeout = async <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -37,7 +38,12 @@ const withTimeout = async <T>(promise: Promise<T>, ms: number, label: string): P
 const COLLECTIONS = {
   PROPERTIES: 'properties',
   USERS: 'users',
-  FAVORITES: 'favorites'
+  FAVORITES: 'favorites',
+  VIEWINGS: 'viewings',
+  APPLICATIONS: 'applications',
+  PAYMENTS: 'payments',
+  DOCUMENTS: 'documents',
+  SAVED_PROPERTIES: 'saved_properties',
 } as const;
 
 // Response types
@@ -227,6 +233,17 @@ export const userHelpers = {
           error: null 
         };
       } else {
+        // Fallback for legacy users stored with a different document id
+        const usersRef = collection(db, COLLECTIONS.USERS);
+        const q = query(usersRef, where('uid', '==', userId), limit(1));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const docSnap = querySnapshot.docs[0];
+          return {
+            data: { id: docSnap.id, ...docSnap.data() } as User,
+            error: null
+          };
+        }
         return { data: null, error: 'User not found' };
       }
     } catch (error: any) {
@@ -336,6 +353,18 @@ export const favoriteHelpers = {
 
       console.log('🔍 favoriteHelpers: Created favorite document:', docRef.id);
 
+      // Mirror to saved_properties collection for profile stats
+      // Note: If rules don't allow this collection yet, we ignore the error
+      try {
+        await addDoc(collection(db, COLLECTIONS.SAVED_PROPERTIES), {
+          userId: favoriteData.userId,
+          propertyId: favoriteData.propertyId,
+          createdAt: serverTimestamp(),
+        });
+      } catch (mirrorError: any) {
+        console.warn('favoriteHelpers: saved_properties mirror failed:', mirrorError?.message || mirrorError);
+      }
+
       return { data: {
         id: docRef.id,
         user_id: favoriteData.userId, // Keep for compatibility
@@ -351,21 +380,27 @@ export const favoriteHelpers = {
   // Remove favorite
   async removeFavorite(userId: string, propertyId: string): Promise<FirestoreResponse<{ id: string }>> {
     try {
-      const favoritesRef = collection(db, COLLECTIONS.FAVORITES);
-      const q = query(
-        favoritesRef,
-        where('user_id', '==', userId),
-        where('property_id', '==', propertyId)
-      );
+      const favoritesRef = collection(db, `users/${userId}/favorites`);
+      const q = query(favoritesRef, where('property_id', '==', propertyId));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
         const docRef = querySnapshot.docs[0];
         await deleteDoc(docRef.ref);
-        return { data: { id: docRef.id }, error: null };
-      } else {
-        return { data: null, error: 'Favorite not found' };
       }
+
+      const savedRef = collection(db, COLLECTIONS.SAVED_PROPERTIES);
+      const savedQuery = query(
+        savedRef,
+        where('userId', '==', userId),
+        where('propertyId', '==', propertyId)
+      );
+      const savedSnapshot = await getDocs(savedQuery);
+      if (!savedSnapshot.empty) {
+        await deleteDoc(savedSnapshot.docs[0].ref);
+      }
+
+      return { data: querySnapshot.empty ? null : { id: querySnapshot.docs[0].id }, error: null };
     } catch (error: any) {
       console.error('Error removing favorite:', error);
       return { data: null, error: error.message };
@@ -391,9 +426,323 @@ export const favoriteHelpers = {
   }
 };
 
+// Viewings CRUD Operations
+export const viewingHelpers = {
+  async createViewing(data: Omit<Viewing, 'id' | 'createdAt' | 'updatedAt'>): Promise<FirestoreResponse<Viewing>> {
+    try {
+      const viewingsRef = collection(db, COLLECTIONS.VIEWINGS);
+      const payload = {
+        ...data,
+        scheduledAt: data.scheduledAt instanceof Date ? Timestamp.fromDate(data.scheduledAt) : data.scheduledAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const docRef = await withTimeout(addDoc(viewingsRef, payload), 30000, 'createViewing');
+      return { data: { id: docRef.id, ...data } as Viewing, error: null };
+    } catch (error: any) {
+      console.error('Error creating viewing:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async updateViewing(viewingId: string, updateData: Partial<Viewing>): Promise<FirestoreResponse<Viewing>> {
+    try {
+      const viewingRef = doc(db, COLLECTIONS.VIEWINGS, viewingId);
+      const payload: Record<string, any> = {
+        ...updateData,
+        updatedAt: serverTimestamp(),
+      };
+      if (updateData.scheduledAt instanceof Date) {
+        payload.scheduledAt = Timestamp.fromDate(updateData.scheduledAt);
+      }
+      await withTimeout(updateDoc(viewingRef, payload), 30000, 'updateViewing');
+      return { data: { id: viewingId, ...updateData } as Viewing, error: null };
+    } catch (error: any) {
+      console.error('Error updating viewing:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getViewingById(viewingId: string): Promise<FirestoreResponse<Viewing>> {
+    try {
+      const viewingRef = doc(db, COLLECTIONS.VIEWINGS, viewingId);
+      const viewingDoc = await getDoc(viewingRef);
+
+      if (viewingDoc.exists()) {
+        return {
+          data: { id: viewingDoc.id, ...viewingDoc.data() } as Viewing,
+          error: null
+        };
+      }
+      return { data: null, error: 'Viewing not found' };
+    } catch (error: any) {
+      console.error('Error getting viewing:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getViewingsForTenant(tenantId: string): Promise<FirestoreResponse<Viewing[]>> {
+    try {
+      const viewingsRef = collection(db, COLLECTIONS.VIEWINGS);
+      const q = query(
+        viewingsRef,
+        where('tenantId', '==', tenantId),
+        orderBy('scheduledAt', 'asc')
+      );
+      const snapshot = await getDocs(q);
+      const viewings: Viewing[] = [];
+      snapshot.forEach((docSnap) => {
+        viewings.push({ id: docSnap.id, ...docSnap.data() } as Viewing);
+      });
+      return { data: viewings, error: null };
+    } catch (error: any) {
+      console.error('Error getting tenant viewings:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getViewingsForOwner(ownerId: string): Promise<FirestoreResponse<Viewing[]>> {
+    try {
+      const viewingsRef = collection(db, COLLECTIONS.VIEWINGS);
+      const q = query(
+        viewingsRef,
+        where('ownerId', '==', ownerId),
+        orderBy('scheduledAt', 'asc')
+      );
+      const snapshot = await getDocs(q);
+      const viewings: Viewing[] = [];
+      snapshot.forEach((docSnap) => {
+        viewings.push({ id: docSnap.id, ...docSnap.data() } as Viewing);
+      });
+      return { data: viewings, error: null };
+    } catch (error: any) {
+      console.error('Error getting owner viewings:', error);
+      return { data: null, error: error.message };
+    }
+  }
+};
+
+// Applications CRUD Operations
+export const applicationHelpers = {
+  async createApplication(data: Omit<Application, 'id' | 'createdAt' | 'updatedAt'>): Promise<FirestoreResponse<Application>> {
+    try {
+      const applicationsRef = collection(db, COLLECTIONS.APPLICATIONS);
+      const payload = {
+        ...data,
+        status: data.status || 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const docRef = await withTimeout(addDoc(applicationsRef, payload), 30000, 'createApplication');
+      return { data: { id: docRef.id, ...data } as Application, error: null };
+    } catch (error: any) {
+      console.error('Error creating application:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getApplicationById(applicationId: string): Promise<FirestoreResponse<Application>> {
+    try {
+      const applicationRef = doc(db, COLLECTIONS.APPLICATIONS, applicationId);
+      const snapshot = await getDoc(applicationRef);
+      if (snapshot.exists()) {
+        return { data: { id: snapshot.id, ...snapshot.data() } as Application, error: null };
+      }
+      return { data: null, error: 'Application not found' };
+    } catch (error: any) {
+      console.error('Error getting application:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async updateApplication(applicationId: string, updates: Partial<Application>): Promise<FirestoreResponse<Application>> {
+    try {
+      const applicationRef = doc(db, COLLECTIONS.APPLICATIONS, applicationId);
+      await withTimeout(
+        updateDoc(applicationRef, {
+          ...updates,
+          updatedAt: serverTimestamp(),
+        }),
+        30000,
+        'updateApplication'
+      );
+
+      return { data: { id: applicationId, ...updates } as Application, error: null };
+    } catch (error: any) {
+      console.error('Error updating application:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getApplicationsForTenant(tenantId: string): Promise<FirestoreResponse<Application[]>> {
+    try {
+      const applicationsRef = collection(db, COLLECTIONS.APPLICATIONS);
+      const q = query(applicationsRef, where('tenantId', '==', tenantId));
+      const snapshot = await getDocs(q);
+      const applications: Application[] = [];
+      snapshot.forEach((docSnap) => {
+        applications.push({ id: docSnap.id, ...docSnap.data() } as Application);
+      });
+      return { data: applications, error: null };
+    } catch (error: any) {
+      console.error('Error getting tenant applications:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getApplicationsForOwner(ownerId: string): Promise<FirestoreResponse<Application[]>> {
+    try {
+      const applicationsRef = collection(db, COLLECTIONS.APPLICATIONS);
+      const q = query(applicationsRef, where('ownerId', '==', ownerId));
+      const snapshot = await getDocs(q);
+      const applications: Application[] = [];
+      snapshot.forEach((docSnap) => {
+        applications.push({ id: docSnap.id, ...docSnap.data() } as Application);
+      });
+      return { data: applications, error: null };
+    } catch (error: any) {
+      console.error('Error getting owner applications:', error);
+      return { data: null, error: error.message };
+    }
+  },
+};
+
+// Payments CRUD Operations
+export const paymentHelpers = {
+  async createPayment(data: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>): Promise<FirestoreResponse<Payment>> {
+    try {
+      const paymentsRef = collection(db, COLLECTIONS.PAYMENTS);
+      const payload = {
+        ...data,
+        status: data.status || 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const docRef = await withTimeout(addDoc(paymentsRef, payload), 30000, 'createPayment');
+      return { data: { id: docRef.id, ...data } as Payment, error: null };
+    } catch (error: any) {
+      console.error('Error creating payment:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getPaymentsForTenant(tenantId: string): Promise<FirestoreResponse<Payment[]>> {
+    try {
+      const paymentsRef = collection(db, COLLECTIONS.PAYMENTS);
+      const q = query(paymentsRef, where('tenantId', '==', tenantId));
+      const snapshot = await getDocs(q);
+      const payments: Payment[] = [];
+      snapshot.forEach((docSnap) => {
+        payments.push({ id: docSnap.id, ...docSnap.data() } as Payment);
+      });
+      return { data: payments, error: null };
+    } catch (error: any) {
+      console.error('Error getting tenant payments:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getPaymentsForOwner(ownerId: string): Promise<FirestoreResponse<Payment[]>> {
+    try {
+      const paymentsRef = collection(db, COLLECTIONS.PAYMENTS);
+      const q = query(paymentsRef, where('ownerId', '==', ownerId));
+      const snapshot = await getDocs(q);
+      const payments: Payment[] = [];
+      snapshot.forEach((docSnap) => {
+        payments.push({ id: docSnap.id, ...docSnap.data() } as Payment);
+      });
+      return { data: payments, error: null };
+    } catch (error: any) {
+      console.error('Error getting owner payments:', error);
+      return { data: null, error: error.message };
+    }
+  },
+};
+
+// Documents CRUD Operations
+export const documentHelpers = {
+  async createDocument(data: Omit<Document, 'id' | 'createdAt' | 'updatedAt'>): Promise<FirestoreResponse<Document>> {
+    try {
+      const documentsRef = collection(db, COLLECTIONS.DOCUMENTS);
+      const payload = {
+        ...data,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const docRef = await withTimeout(addDoc(documentsRef, payload), 30000, 'createDocument');
+      return { data: { id: docRef.id, ...data } as Document, error: null };
+    } catch (error: any) {
+      console.error('Error creating document:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async getDocumentsForUser(userId: string): Promise<FirestoreResponse<Document[]>> {
+    try {
+      const documentsRef = collection(db, COLLECTIONS.DOCUMENTS);
+      const q = query(documentsRef, where('userId', '==', userId));
+      const snapshot = await getDocs(q);
+      const documents: Document[] = [];
+      snapshot.forEach((docSnap) => {
+        documents.push({ id: docSnap.id, ...docSnap.data() } as Document);
+      });
+      return { data: documents, error: null };
+    } catch (error: any) {
+      console.error('Error getting documents:', error);
+      return { data: null, error: error.message };
+    }
+  },
+};
+
+// Saved properties (tenant favorites mirror)
+export const savedPropertyHelpers = {
+  async addSavedProperty(data: { userId: string; propertyId: string }): Promise<FirestoreResponse<SavedProperty>> {
+    try {
+      const savedRef = collection(db, COLLECTIONS.SAVED_PROPERTIES);
+      const payload = {
+        userId: data.userId,
+        propertyId: data.propertyId,
+        createdAt: serverTimestamp(),
+      };
+      const docRef = await addDoc(savedRef, payload);
+      return { data: { id: docRef.id, ...data } as SavedProperty, error: null };
+    } catch (error: any) {
+      console.error('Error adding saved property:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async removeSavedProperty(userId: string, propertyId: string): Promise<FirestoreResponse<{ id: string }>> {
+    try {
+      const savedRef = collection(db, COLLECTIONS.SAVED_PROPERTIES);
+      const q = query(
+        savedRef,
+        where('userId', '==', userId),
+        where('propertyId', '==', propertyId)
+      );
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        return { data: null, error: 'Saved property not found' };
+      }
+      const docRef = snapshot.docs[0].ref;
+      await deleteDoc(docRef);
+      return { data: { id: snapshot.docs[0].id }, error: null };
+    } catch (error: any) {
+      console.error('Error removing saved property:', error);
+      return { data: null, error: error.message };
+    }
+  },
+};
+
 // Export all helpers
 export default {
   propertyHelpers,
   userHelpers,
-  favoriteHelpers
+  favoriteHelpers,
+  viewingHelpers,
+  applicationHelpers,
+  paymentHelpers,
+  documentHelpers,
+  savedPropertyHelpers,
 };
+

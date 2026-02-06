@@ -3,18 +3,29 @@ export type UserRole = 'owner' | 'tenant';
 export type PropertyType = 'apartment' | 'house' | 'studio' | 'townhouse' | 'condo' | 'loft';
 export type PropertyStatus = 'available' | 'rented' | 'unavailable' | 'pending';
 export type InquiryStatus = 'pending' | 'responded' | 'accepted' | 'rejected' | 'closed';
-export type MessageType = 'text' | 'image' | 'file' | 'location';
+export type MessageType = 'text' | 'image' | 'file' | 'location' | 'property_offer' | 'audio';
 export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
+export type ViewingType = 'in_person' | 'virtual' | 'self_guided';
+export type ViewingStatus = AppointmentStatus | 'declined';
 export type NotificationType = 'message' | 'inquiry' | 'appointment' | 'property_update' | 'system';
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+export type ApplicationStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn' | 'needs_info';
+export type PaymentStatus = 'pending' | 'paid' | 'failed';
 
 export interface User {
   id: string;
+  uid?: string;
   email: string;
   phone?: string;
   firstName: string;
   lastName: string;
   role: UserRole;
   avatarUrl?: string;
+  photoURL?: string;
+  name?: string;
+  shareContactInfo?: boolean;
+  isOnline?: boolean;
+  lastSeen?: any;
   isVerified: boolean;
   isActive: boolean;
   createdAt: string;
@@ -75,8 +86,61 @@ export interface Property {
   // Media
   media?: PropertyMedia[];
   primaryImageUrl?: string;
+  viewingDays?: number[];
+  viewingTimeSlots?: ViewingTimeSlotRange[] | string[];
+  blockedDates?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ViewingTimeSlotRange {
+  start: string; // 24h "HH:MM"
+  end: string; // 24h "HH:MM"
+  days?: WeekdayKey[];
+}
+
+export interface Application {
+  id: string;
+  propertyId: string;
+  tenantId: string;
+  ownerId: string;
+  message?: string;
+  status: ApplicationStatus;
+  decisionDate?: any;
+  decisionNotes?: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface Payment {
+  id: string;
+  propertyId?: string;
+  tenantId: string;
+  ownerId: string;
+  amount: number;
+  currency?: string;
+  status: PaymentStatus;
+  dueDate?: string;
+  paidAt?: any;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface Document {
+  id: string;
+  userId: string;
+  title: string;
+  type: 'lease' | 'id' | 'contract' | 'other';
+  url: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface SavedProperty {
+  id: string;
+  userId: string;
+  propertyId: string;
+  createdAt: any;
 }
 
 export interface PropertyMedia {
@@ -130,12 +194,20 @@ export interface Message {
   attachment_url?: string;
   is_read: boolean;
   created_at: string;
+  property_offer_id?: string;
   // Enhanced fields for advanced messaging
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   reply_to?: string; // Message ID being replied to
   reactions?: { [emoji: string]: string[] }; // emoji -> user IDs
   edited_at?: string;
   deleted_at?: string;
+  deleted_for?: string[]; // user IDs who deleted for me
+  deleted_for_everyone?: boolean;
+  deleted_by?: string;
+  local_uri?: string;
+  upload_status?: 'uploading' | 'uploaded' | 'failed';
+  upload_progress?: number; // 0-1
+  retry_count?: number;
   // Media and rich content fields
   media?: MessageMedia[];
   link_preview?: LinkPreview;
@@ -153,6 +225,7 @@ export interface MessageMedia {
   filename?: string;
   file_size?: number;
   mime_type?: string;
+  format?: 'm4a' | 'webm';
   width?: number;
   height?: number;
   duration?: number; // for video/audio/voice
@@ -164,6 +237,13 @@ export interface VoiceMessageData {
   waveform: number[];
   sample_rate?: number;
   channels?: number;
+}
+
+export interface VoiceUploadPayload extends VoiceMessageData {
+  uri: string;
+  format: 'm4a' | 'webm';
+  mimeType: string;
+  blob?: Blob;
 }
 
 export interface SearchFilter {
@@ -231,7 +311,11 @@ export interface TypingIndicator {
 export interface Conversation {
   id: string;
   property_id?: string;
+  ownerId?: string;
+  propertyReferences?: string[];
   participants: string[]; // Array of Firebase Auth UID strings
+  participant1_id?: string; // Legacy support
+  participant2_id?: string; // Legacy support
   last_message_at: string;
   created_at: string;
   createdBy?: string; // For debugging legacy conversations
@@ -247,6 +331,23 @@ export interface ViewingAppointment {
   notes?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Viewing {
+  id: string;
+  propertyId: string;
+  tenantId: string;
+  ownerId: string;
+  scheduledAt: any;
+  timeSlot: string;
+  viewingType: ViewingType;
+  status: ViewingStatus;
+  contactName: string;
+  contactEmail: string;
+  contactPhone?: string;
+  notes?: string;
+  createdAt: any;
+  updatedAt: any;
 }
 
 export interface Notification {

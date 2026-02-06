@@ -10,6 +10,8 @@ import {
   Animated,
   LayoutAnimation,
   UIManager,
+  InputAccessoryView,
+  TextInput,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { FlatList } from 'react-native';
@@ -24,7 +26,7 @@ import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 import { Message, Conversation, Property } from '../../types/database';
 import ChatBubble from './ChatBubble';
 import DateSeparator from './DateSeparator';
@@ -68,9 +70,13 @@ function ChatRoom({
   otherUser,
   property,
 }: ChatRoomProps) {
+  const { theme } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Message>>(null);
+  const chatInputRef = useRef<TextInput | null>(null);
+  const accessoryTriggerRef = useRef<TextInput | null>(null);
+  const pendingAccessoryFocusRef = useRef(false);
   const scrollPositionRef = useRef({ offset: 0, contentHeight: 0, layoutHeight: 0 });
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -81,15 +87,17 @@ function ChatRoom({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Video call pulse animation
   const videoCallPulseAnim = useRef(new Animated.Value(0)).current;
 
-  // Calculate keyboard vertical offset - only header height
-  // KeyboardAvoidingView automatically accounts for safe area, so we only need header
-  const keyboardVerticalOffset = useMemo(() => {
-    return HEADER_HEIGHT; // Just the header, KeyboardAvoidingView handles safe area
-  }, []);
+  const keyboardVerticalOffset = useMemo(() => HEADER_HEIGHT, []);
+  const inputAccessoryId = useMemo(
+    () => `chat-input-accessory-${conversation.id}-${user?.uid || 'guest'}`,
+    [conversation.id, user?.uid]
+  );
+  const showInputPlaceholder = Platform.OS === 'ios' && keyboardHeight === 0;
 
   // Initialize pulse animation
   useEffect(() => {
@@ -165,6 +173,16 @@ function ChatRoom({
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
+        if (Platform.OS === 'ios' && pendingAccessoryFocusRef.current) {
+          pendingAccessoryFocusRef.current = false;
+          requestAnimationFrame(() => {
+            if (chatInputRef.current) {
+              chatInputRef.current.focus();
+            } else {
+              setTimeout(() => chatInputRef.current?.focus(), 30);
+            }
+          });
+        }
         if (isNearBottom) {
           setTimeout(() => scrollToBottom(true, true), 100);
         }
@@ -545,7 +563,7 @@ function ChatRoom({
         {onBack && (
           <IconButton
             icon="chevron-left"
-            iconColor={defaultTheme.colors.onPrimary}
+            iconColor={theme.colors.onPrimary}
             size={28}
             onPress={onBack}
             style={styles.headerBackButton}
@@ -562,7 +580,7 @@ function ChatRoom({
             size={40}
             label={initial}
             style={[styles.headerAvatar, styles.headerAvatarText]}
-            labelStyle={{ color: defaultTheme.colors.primary }}
+            labelStyle={{ color: theme.colors.primary }}
           />
         )}
         <View style={styles.headerInfo}>
@@ -573,7 +591,7 @@ function ChatRoom({
         </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity style={styles.headerIcon} onPress={handlePhoneCall}>
-            <Ionicons name="call-outline" size={22} color={defaultTheme.colors.onPrimary} />
+            <Ionicons name="call-outline" size={22} color={theme.colors.onPrimary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={handleVideoCall}>
             <Animated.View style={{
@@ -588,7 +606,7 @@ function ChatRoom({
                 outputRange: [0.7, 1],
               }),
             }}>
-              <Ionicons name="videocam-outline" size={22} color={defaultTheme.colors.onPrimary} />
+              <Ionicons name="videocam-outline" size={22} color={theme.colors.onPrimary} />
             </Animated.View>
           </TouchableOpacity>
         </View>
@@ -603,7 +621,7 @@ function ChatRoom({
         {renderHeader()}
         <SafeAreaView style={styles.chatSafeArea} edges={[]}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.loadingText}>Loading messages...</Text>
           </View>
         </SafeAreaView>
@@ -668,17 +686,73 @@ function ChatRoom({
               }
             />
 
-            <ChatInputBar
-              value={newMessage}
-              onChangeText={setNewMessage}
-              onSend={handleSend}
-              onSendMedia={handleSendMedia}
-              onSendVoice={handleSendVoice}
-              conversationId={conversation.id}
-              isFocused={isInputFocused}
-              onFocus={handleInputFocus}
-              onBlur={handleInputBlur}
-            />
+            {Platform.OS === 'ios' && (
+              <TextInput
+                ref={accessoryTriggerRef}
+                style={styles.hiddenAccessoryInput}
+                value=""
+                onChangeText={() => {}}
+                blurOnSubmit={false}
+                inputAccessoryViewID={inputAccessoryId}
+                caretHidden
+                contextMenuHidden
+                onFocus={() => {
+                  pendingAccessoryFocusRef.current = true;
+                  setIsInputFocused(true);
+                }}
+                onBlur={handleInputBlur}
+              />
+            )}
+
+            {showInputPlaceholder && (
+              <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => accessoryTriggerRef.current?.focus()}
+                  style={styles.inputPlaceholderTap}
+                >
+                  <View style={styles.inputPlaceholderBar}>
+                    <Ionicons name="camera-outline" size={20} color={theme.colors.onSurfaceVariant} />
+                    <Text style={styles.inputPlaceholderText}>Message</Text>
+                    <Ionicons name="mic" size={18} color={theme.colors.onSurfaceVariant} />
+                  </View>
+                </TouchableOpacity>
+              </SafeAreaView>
+            )}
+
+            {Platform.OS === 'ios' ? (
+              <InputAccessoryView nativeID={inputAccessoryId} backgroundColor="transparent">
+                <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
+                  <ChatInputBar
+                    value={newMessage}
+                    onChangeText={setNewMessage}
+                    onSend={handleSend}
+                    onSendMedia={handleSendMedia}
+                    onSendVoice={handleSendVoice}
+                    conversationId={conversation.id}
+                    isFocused={isInputFocused}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    inputAccessoryViewID={inputAccessoryId}
+                    inputRef={chatInputRef}
+                  />
+                </SafeAreaView>
+              </InputAccessoryView>
+            ) : (
+              <SafeAreaView style={[styles.inputSafeArea, { paddingBottom: insets.bottom }]} edges={[]}>
+                <ChatInputBar
+                  value={newMessage}
+                  onChangeText={setNewMessage}
+                  onSend={handleSend}
+                  onSendMedia={handleSendMedia}
+                  onSendVoice={handleSendVoice}
+                  conversationId={conversation.id}
+                  isFocused={isInputFocused}
+                  onFocus={handleInputFocus}
+                  onBlur={handleInputBlur}
+                />
+              </SafeAreaView>
+            )}
           </View>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -686,10 +760,10 @@ function ChatRoom({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   chatContainer: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.colors.background,
   },
   keyboardAvoid: {
     flex: 1,
@@ -709,17 +783,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingBottom: 12,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerBackButton: {
     margin: -8,
   },
   headerAvatar: {
     marginRight: 12,
-    backgroundColor: defaultTheme.colors.onPrimary,
+    backgroundColor: theme.colors.onPrimary,
   },
   headerAvatarText: {
-    backgroundColor: defaultTheme.colors.onPrimary,
+    backgroundColor: theme.colors.onPrimary,
   },
   headerInfo: {
     flex: 1,
@@ -728,11 +802,11 @@ const styles = StyleSheet.create({
   headerName: {
     fontSize: 16,
     fontWeight: '600',
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
   },
   headerStatus: {
     fontSize: 12,
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     opacity: 0.85,
     marginTop: 2,
   },
@@ -767,16 +841,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   replyPreview: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     padding: 8,
     borderRadius: 8,
     marginBottom: 4,
     borderLeftWidth: 3,
-    borderLeftColor: defaultTheme.colors.primary,
+    borderLeftColor: theme.colors.primary,
   },
   replyPreviewText: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   loadingContainer: {
     flex: 1,
@@ -786,7 +860,38 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
+  },
+  inputSafeArea: {
+    backgroundColor: theme.colors.background,
+  },
+  hiddenAccessoryInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+    bottom: 0,
+    left: 0,
+  },
+  inputPlaceholderTap: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  inputPlaceholderBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.colors.outline,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  inputPlaceholderText: {
+    flex: 1,
+    fontSize: 16,
+    color: theme.colors.onSurfaceVariant,
   },
 });
 

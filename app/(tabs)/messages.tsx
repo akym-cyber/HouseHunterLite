@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
   FlatList,
   RefreshControl,
   Alert,
-  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import {
@@ -20,14 +19,35 @@ import { router } from 'expo-router';
 import { auth } from '../../src/services/firebase/firebaseConfig';
 import { useMessages } from '../../src/hooks/useMessages';
 import { useAuth } from '../../src/hooks/useAuth';
-import { defaultTheme } from '../../src/styles/theme';
-import { Conversation } from '../../src/types/database';
+import { useTheme } from '../../src/theme/useTheme';
+import { userHelpers } from '../../src/services/firebase/firebaseHelpers';
+import { Conversation, User } from '../../src/types/database';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import SwipeableChatRow from '../../src/components/chat/SwipeableChatRow';
+import { confirmAction } from '../../src/components/chat/ConfirmationModal';
+import { showMessageActions } from '../../src/components/chat/MessageActions';
+
+const timestampToDate = (timestamp: any): Date | null => {
+  if (!timestamp) return null;
+  if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp === 'number' || typeof timestamp === 'string') {
+    const parsed = new Date(timestamp);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof timestamp === 'object' && timestamp.seconds !== undefined) {
+    return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+  }
+  return null;
+};
 
 // Utility function to format timestamps
-const formatTimestamp = (timestamp: string) => {
+const formatTimestamp = (timestamp: any) => {
+  const messageTime = timestampToDate(timestamp);
+  if (!messageTime) {
+    return 'Unknown time';
+  }
+
   const now = new Date();
-  const messageTime = new Date(timestamp);
   const diffInMs = now.getTime() - messageTime.getTime();
   const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
   const diffInHours = Math.floor(diffInMinutes / 60);
@@ -48,12 +68,53 @@ const formatTimestamp = (timestamp: string) => {
   }
 };
 
+const getOtherParticipantId = (conversation: Conversation, currentUserId?: string | null): string | null => {
+  if (!currentUserId) return null;
+  if (Array.isArray(conversation.participants) && conversation.participants.length > 0) {
+    return conversation.participants.find(id => id !== currentUserId) || conversation.participants[0] || null;
+  }
+  if (conversation.participant1_id && conversation.participant2_id) {
+    return conversation.participant1_id === currentUserId
+      ? conversation.participant2_id
+      : conversation.participant1_id;
+  }
+  return null;
+};
+
+const getDisplayName = (profile?: User | null): string => {
+  if (!profile) return 'Unknown User';
+  const first = profile.firstName?.trim();
+  const last = profile.lastName?.trim();
+  if (first || last) {
+    return `${first || ''} ${last || ''}`.trim();
+  }
+  if (profile.name && profile.name.trim()) {
+    return profile.name.trim();
+  }
+  if (profile.email) {
+    return profile.email.split('@')[0];
+  }
+  return 'Unknown User';
+};
+
+const getInitial = (name: string): string => {
+  const initial = name.trim().charAt(0);
+  return (initial || 'U').toUpperCase();
+};
+
+const getAvatarUrl = (profile?: User | null): string | undefined => {
+  return profile?.avatarUrl || profile?.photoURL || undefined;
+};
+
 export default function MessagesScreen() {
+  const { theme } = useTheme();
   const { user } = useAuth();
-  const { conversations, loading, error, refreshConversations, unreadCount, isOnline } = useMessages();
+  const { conversations, loading, error, refreshConversations, unreadCount, isOnline, deleteConversation } = useMessages();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [authCheckDone, setAuthCheckDone] = useState(false);
+  const [userProfiles, setUserProfiles] = useState<Record<string, User | null>>({});
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   // 🔍 COMPREHENSIVE DEBUGGING
   useEffect(() => {
@@ -116,11 +177,80 @@ export default function MessagesScreen() {
   useEffect(() => {
     const filtered = conversations.filter(conversation => {
       if (!searchQuery) return true;
-      return conversation.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             (conversation.property_id && conversation.property_id.toLowerCase().includes(searchQuery.toLowerCase()));
+      const queryText = searchQuery.toLowerCase();
+      const otherId = getOtherParticipantId(conversation, user?.uid);
+      const otherUser = otherId ? userProfiles[otherId] : null;
+      const displayName = getDisplayName(otherUser).toLowerCase();
+
+      return conversation.id.toLowerCase().includes(queryText) ||
+             (conversation.property_id && conversation.property_id.toLowerCase().includes(queryText)) ||
+             displayName.includes(queryText);
     });
     console.log("📱 Filtered conversations count:", filtered?.length || 0);
-  }, [conversations, searchQuery]);
+  }, [conversations, searchQuery, user?.uid, userProfiles]);
+
+  const mergedConversations = useMemo(() => {
+    if (!user?.uid) return conversations;
+
+    const byOwner = new Map<string, { base: Conversation; refs: Set<string> }>();
+
+    conversations.forEach((conv) => {
+      const key = conv.ownerId || getOtherParticipantId(conv, user.uid) || conv.id;
+      const refs = new Set<string>([
+        ...(conv.propertyReferences || []),
+        ...(conv.property_id ? [conv.property_id] : []),
+      ]);
+
+      const existing = byOwner.get(key);
+      if (!existing) {
+        byOwner.set(key, { base: conv, refs });
+        return;
+      }
+
+      // Keep the most recent conversation as the base
+      const existingTime = new Date(existing.base.last_message_at).getTime();
+      const nextTime = new Date(conv.last_message_at).getTime();
+      if (nextTime > existingTime) {
+        byOwner.set(key, { base: conv, refs: new Set([...existing.refs, ...refs]) });
+      } else {
+        existing.refs = new Set([...existing.refs, ...refs]);
+      }
+    });
+
+    return Array.from(byOwner.values()).map(({ base, refs }) => ({
+      ...base,
+      propertyReferences: Array.from(refs),
+    }));
+  }, [conversations, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid || mergedConversations.length === 0) return;
+
+    const otherIds = Array.from(new Set(
+      mergedConversations
+        .map(conversation => getOtherParticipantId(conversation, user.uid))
+        .filter((id): id is string => !!id)
+    ));
+
+    const missingIds = otherIds.filter(id => userProfiles[id] === undefined);
+    if (missingIds.length === 0) return;
+
+    let isMounted = true;
+
+    const loadProfiles = async () => {
+      for (const id of missingIds) {
+        const result = await userHelpers.getUserById(id);
+        if (!isMounted) return;
+        setUserProfiles(prev => ({ ...prev, [id]: result.data ?? null }));
+      }
+    };
+
+    loadProfiles();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mergedConversations, user?.uid, userProfiles]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -129,15 +259,44 @@ export default function MessagesScreen() {
   };
 
   // Filter conversations based on search query
-  const filteredConversations = conversations.filter(conversation => {
+  const filteredConversations = mergedConversations.filter(conversation => {
     if (!searchQuery) return true;
-    // Since we don't have user names yet, we'll filter by conversation ID or property ID
-    return conversation.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           (conversation.property_id && conversation.property_id.toLowerCase().includes(searchQuery.toLowerCase()));
+    const queryText = searchQuery.toLowerCase();
+    const otherId = getOtherParticipantId(conversation, user?.uid);
+    const otherUser = otherId ? userProfiles[otherId] : null;
+    const displayName = getDisplayName(otherUser).toLowerCase();
+
+    return conversation.id.toLowerCase().includes(queryText) ||
+           (conversation.property_id && conversation.property_id.toLowerCase().includes(queryText)) ||
+           displayName.includes(queryText);
   });
 
   const handleConversationPress = (conversation: Conversation) => {
     router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
+  };
+
+  const handleDeleteConversation = (conversation: Conversation) => {
+    confirmAction({
+      title: 'Delete Conversation',
+      message: 'Delete this conversation? This cannot be undone.',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        const result = await deleteConversation(conversation.id);
+        if (!result.success) {
+          Alert.alert('Error', result.error || 'Failed to delete conversation');
+        }
+      },
+    });
+  };
+
+  const handleConversationLongPress = (conversation: Conversation) => {
+    showMessageActions('Conversation Options', [
+      {
+        label: 'Delete Chat',
+        onPress: () => handleDeleteConversation(conversation),
+        destructive: true,
+      },
+    ]);
   };
 
   const renderConversation = ({ item }: { item: Conversation }) => {
@@ -148,36 +307,54 @@ export default function MessagesScreen() {
         return null;
       }
 
-      // For now, assume conversations are unread if less than 1 hour old
-      const lastMessageTime = item.last_message_at ? new Date(item.last_message_at).getTime() : 0;
-      const isUnread = !isNaN(lastMessageTime) && (new Date().getTime() - lastMessageTime) < (1000 * 60 * 60);
+      const otherId = getOtherParticipantId(item, user?.uid);
+      const otherUser = otherId ? userProfiles[otherId] : null;
+      const displayName = getDisplayName(otherUser);
+      const avatarUrl = getAvatarUrl(otherUser);
+      const initial = getInitial(displayName);
+
+      const lastMessageDate = timestampToDate(item.last_message_at);
+      const lastMessageTime = lastMessageDate ? lastMessageDate.getTime() : 0;
+      const isUnread = lastMessageTime > 0 && (new Date().getTime() - lastMessageTime) < (1000 * 60 * 60);
+
+      const propertyCount = item.propertyReferences?.length || (item.property_id ? 1 : 0);
+      const previewText = propertyCount > 1 ? `${propertyCount} properties` : 'Tap to start chatting';
 
       return (
-        <TouchableOpacity
+        <SwipeableChatRow
           style={[styles.conversationCard, isUnread && styles.unreadCard]}
           onPress={() => handleConversationPress(item)}
-          activeOpacity={0.7}
+          onLongPress={() => handleConversationLongPress(item)}
+          onDelete={() => handleDeleteConversation(item)}
         >
           <View style={styles.conversationContent}>
-            <Avatar.Text
-              size={50}
-              label="U"
-              style={styles.avatar}
-            />
+            {avatarUrl ? (
+              <Avatar.Image
+                size={50}
+                source={{ uri: avatarUrl }}
+                style={styles.avatar}
+              />
+            ) : (
+              <Avatar.Text
+                size={50}
+                label={initial}
+                style={styles.avatar}
+              />
+            )}
             <View style={styles.conversationInfo}>
               <Title style={[styles.conversationName, isUnread && styles.unreadText]}>
-                Unknown User
+                {displayName}
               </Title>
               <Text style={[styles.conversationPreview, isUnread && styles.unreadText]} numberOfLines={1}>
-                Tap to start chatting
+                {previewText}
               </Text>
               <Text style={[styles.conversationTime, isUnread && styles.unreadTime]}>
-                {item.last_message_at ? formatTimestamp(item.last_message_at) : 'Unknown time'}
+                {formatTimestamp(item.last_message_at)}
               </Text>
             </View>
           </View>
           {isUnread && <View style={styles.unreadIndicator} />}
-        </TouchableOpacity>
+        </SwipeableChatRow>
       );
     } catch (error) {
       console.error('Error rendering conversation:', error, item);
@@ -221,7 +398,7 @@ export default function MessagesScreen() {
         </View>
         <SafeAreaView style={styles.content} edges={[]}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.loadingText}>
               Loading conversations...
             </Text>
@@ -267,7 +444,7 @@ export default function MessagesScreen() {
         </View>
         <SafeAreaView style={styles.content} edges={[]}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={defaultTheme.colors.primary} />
+            <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.loadingText}>
               Checking authentication...
             </Text>
@@ -307,7 +484,7 @@ export default function MessagesScreen() {
         <FlatList
           data={filteredConversations}
           renderItem={renderConversation}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item.ownerId || getOtherParticipantId(item, user?.uid) || item.id}
           contentContainerStyle={[styles.conversationList, { flexGrow: 1 }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -320,15 +497,15 @@ export default function MessagesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   header: {
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerContent: {
     flexDirection: 'row',
@@ -336,31 +513,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: {
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     fontSize: 24,
     fontWeight: 'bold',
   },
   offlineIndicator: {
-    backgroundColor: defaultTheme.colors.error,
+    backgroundColor: theme.colors.error,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   offlineText: {
-    color: defaultTheme.colors.onError,
+    color: theme.colors.onError,
     fontSize: 12,
     fontWeight: '600',
   },
   conversationList: {
-    padding: 20,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 0,
+    paddingBottom: 16,
   },
   conversationCard: {
-    backgroundColor: defaultTheme.colors.surface,
-    marginBottom: 12,
+    backgroundColor: theme.colors.surface,
+    marginBottom: 2,
     elevation: 1,
     borderRadius: 8,
-    padding: 16,
+    padding: 6,
     position: 'relative',
   },
   conversationContent: {
@@ -377,15 +555,15 @@ const styles = StyleSheet.create({
   conversationName: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 1,
   },
   conversationPreview: {
-    color: defaultTheme.colors.onSurfaceVariant,
-    marginBottom: 4,
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 1,
   },
   conversationTime: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -401,29 +579,29 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   emptyButton: {
     marginTop: 16,
   },
   unreadCard: {
-    backgroundColor: defaultTheme.colors.primaryContainer,
+    backgroundColor: theme.colors.primaryContainer,
     borderLeftWidth: 4,
-    borderLeftColor: defaultTheme.colors.primary,
+    borderLeftColor: theme.colors.primary,
   },
   unreadText: {
-    color: defaultTheme.colors.onPrimaryContainer,
+    color: theme.colors.onPrimaryContainer,
     fontWeight: '700',
   },
   unreadTime: {
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     fontWeight: '600',
   },
   unreadIndicator: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
     position: 'absolute',
     right: 16,
     top: 16,
@@ -436,7 +614,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   errorContainer: {
     flex: 1,
@@ -454,7 +632,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 24,
   },
   retryButton: {
@@ -464,7 +642,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 16,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   searchBar: {
     elevation: 2,

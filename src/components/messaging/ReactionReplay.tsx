@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { View, TouchableOpacity, Text, Animated, StyleSheet, Platform } from 'react-native';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface ReactionReplayProps {
   reactions: { [emoji: string]: string[] };
@@ -20,6 +20,8 @@ const ReactionReplay: React.FC<ReactionReplayProps> = ({
   isVisible,
   onClose,
 }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [replayReactions, setReplayReactions] = useState<ReplayReaction[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -178,14 +180,14 @@ const AnimatedReaction: React.FC<AnimatedReactionProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: theme.app.overlayScrim,
     zIndex: 2500,
   },
   backdrop: {
@@ -194,7 +196,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 24,
     margin: 20,
@@ -202,7 +204,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
@@ -221,19 +223,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   closeButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeText: {
     fontSize: 18,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontWeight: 'bold',
   },
   replayArea: {
@@ -248,7 +250,7 @@ const styles = StyleSheet.create({
     margin: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     borderRadius: 20,
   },
   reactionEmoji: {
@@ -257,13 +259,13 @@ const styles = StyleSheet.create({
   },
   reactionCount: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontWeight: '500',
   },
   instruction: {
     textAlign: 'center',
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontStyle: 'italic',
   },
 });

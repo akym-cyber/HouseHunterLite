@@ -8,11 +8,11 @@ import {
   query, 
   where, 
   orderBy, 
-  limit,
+  writeBatch,
+  arrayUnion,
   serverTimestamp,
   DocumentData,
-  QueryDocumentSnapshot,
-  getDoc
+  QueryDocumentSnapshot
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Message, Conversation, Inquiry } from '../../types/database';
@@ -147,6 +147,21 @@ export const conversationHelpers = {
       return { data: null, error: error.message };
     }
   },
+
+  async addConversationPropertyReference(conversationId: string, propertyId: string): Promise<FirestoreResponse<Conversation>> {
+    try {
+      const conversationRef = doc(db, COLLECTIONS.CONVERSATIONS, conversationId);
+      await updateDoc(conversationRef, {
+        propertyReferences: arrayUnion(propertyId),
+        last_message_at: serverTimestamp(),
+      });
+
+      return { data: { id: conversationId } as Conversation, error: null };
+    } catch (error: any) {
+      console.error('[addConversationPropertyReference] Error updating conversation:', error);
+      return { data: null, error: error.message };
+    }
+  },
 };
 
 // Message CRUD Operations
@@ -198,6 +213,9 @@ export const messageHelpers = {
         content: messageData.content,
         message_type: messageData.message_type || 'text',
         is_read: false,
+        deleted_for: [],
+        deleted_for_everyone: false,
+        status: messageData.status ?? 'sent',
         created_at: serverTimestamp()
       };
 
@@ -206,9 +224,10 @@ export const messageHelpers = {
         cleanMessageData.attachment_url = messageData.attachment_url;
       }
 
-      if (messageData.status != null) {
-        cleanMessageData.status = messageData.status;
+      if (messageData.property_offer_id != null) {
+        cleanMessageData.property_offer_id = messageData.property_offer_id;
       }
+
 
       if (messageData.reply_to != null) {
         cleanMessageData.reply_to = messageData.reply_to;
@@ -224,6 +243,18 @@ export const messageHelpers = {
 
       if (messageData.deleted_at != null) {
         cleanMessageData.deleted_at = messageData.deleted_at;
+      }
+
+      if (messageData.deleted_for != null) {
+        cleanMessageData.deleted_for = messageData.deleted_for;
+      }
+
+      if (messageData.deleted_for_everyone != null) {
+        cleanMessageData.deleted_for_everyone = messageData.deleted_for_everyone;
+      }
+
+      if (messageData.deleted_by != null) {
+        cleanMessageData.deleted_by = messageData.deleted_by;
       }
 
       if (messageData.media != null) {
@@ -282,10 +313,11 @@ export const messageHelpers = {
 
       const messageRef = doc(db, messagePath);
       await updateDoc(messageRef, {
-        is_read: true
+        is_read: true,
+        status: 'read'
       });
 
-      return { data: { id: messageId, is_read: true } as Message, error: null };
+      return { data: { id: messageId, is_read: true, status: 'read' } as Message, error: null };
     } catch (error: any) {
       console.error('[markMessageAsRead] Error marking message as read:', error);
       return { data: null, error: error.message };
@@ -309,6 +341,108 @@ export const messageHelpers = {
     }
   },
 
+  // Mark message as delivered (receiver device has received it)
+  async markMessageAsDelivered(conversationId: string, messageId: string): Promise<FirestoreResponse<Message>> {
+    try {
+      const messagePath = `conversations/${conversationId}/messages/${messageId}`;
+      const messageRef = doc(db, messagePath);
+      await updateDoc(messageRef, {
+        status: 'delivered'
+      });
+
+      return { data: { id: messageId, status: 'delivered' } as Message, error: null };
+    } catch (error: any) {
+      console.error('[markMessageAsDelivered] Error marking message as delivered:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  // Find conversation by owner and participants
+  async findConversationByOwnerAndParticipants(ownerId: string, participant1Id: string, participant2Id: string): Promise<FirestoreResponse<Conversation | null>> {
+    try {
+      const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
+      const q = query(
+        conversationsRef,
+        where('ownerId', '==', ownerId),
+        where('participants', 'array-contains', participant1Id)
+      );
+
+      const querySnapshot = await getDocs(q);
+
+      for (const docSnap of querySnapshot.docs) {
+        const data = docSnap.data();
+        if (data.participants &&
+            Array.isArray(data.participants) &&
+            data.participants.includes(participant1Id) &&
+            data.participants.includes(participant2Id)) {
+          return { data: { id: docSnap.id, ...data } as Conversation, error: null };
+        }
+      }
+
+      return { data: null, error: null };
+    } catch (error: any) {
+      console.error('[findConversationByOwnerAndParticipants] Error finding conversation:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async deleteMessageForMe(conversationId: string, messageId: string, userId: string): Promise<FirestoreResponse<Message>> {
+    try {
+      const messagePath = `conversations/${conversationId}/messages/${messageId}`;
+      const messageRef = doc(db, messagePath);
+      await updateDoc(messageRef, {
+        deleted_for: arrayUnion(userId),
+        deleted_at: serverTimestamp(),
+      });
+
+      return { data: { id: messageId, deleted_for: [userId] } as Message, error: null };
+    } catch (error: any) {
+      console.error('[deleteMessageForMe] Error deleting message for me:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async deleteMessageForEveryone(conversationId: string, messageId: string, userId: string): Promise<FirestoreResponse<Message>> {
+    try {
+      const messagePath = `conversations/${conversationId}/messages/${messageId}`;
+      const messageRef = doc(db, messagePath);
+      await updateDoc(messageRef, {
+        deleted_for_everyone: true,
+        deleted_by: userId,
+        deleted_at: serverTimestamp(),
+        content: '',
+        attachment_url: null,
+        media: [],
+      });
+
+      return { data: { id: messageId, deleted_for_everyone: true, deleted_by: userId } as Message, error: null };
+    } catch (error: any) {
+      console.error('[deleteMessageForEveryone] Error deleting message for everyone:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
+  async deleteConversation(conversationId: string): Promise<FirestoreResponse<{ id: string }>> {
+    try {
+      const conversationRef = doc(db, COLLECTIONS.CONVERSATIONS, conversationId);
+      const messagesPath = `conversations/${conversationId}/messages`;
+      const messagesRef = collection(db, messagesPath);
+      const snapshot = await getDocs(messagesRef);
+
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((messageDoc) => {
+        batch.delete(messageDoc.ref);
+      });
+      batch.delete(conversationRef);
+      await batch.commit();
+
+      return { data: { id: conversationId }, error: null };
+    } catch (error: any) {
+      console.error('[deleteConversation] Error deleting conversation:', error);
+      return { data: null, error: error.message };
+    }
+  },
+
   // Get conversations by user (alias for conversationHelpers)
   getConversationsByUser: conversationHelpers.getConversationsByUser,
 
@@ -317,6 +451,12 @@ export const messageHelpers = {
 
   // Find conversation by property and participants
   findConversationByPropertyAndParticipants: conversationHelpers.findConversationByPropertyAndParticipants,
+
+  // Find conversation by owner and participants
+  findConversationByOwnerAndParticipants: conversationHelpers.findConversationByOwnerAndParticipants,
+
+  // Add property reference
+  addConversationPropertyReference: conversationHelpers.addConversationPropertyReference,
 
   // Add new inquiry
   async addInquiry(inquiryData: Omit<Inquiry, 'id' | 'created_at' | 'updated_at'>): Promise<FirestoreResponse<Inquiry>> {

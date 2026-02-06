@@ -1,6 +1,10 @@
 // Kenyan Payment Methods Integration
 // Supports M-Pesa, Swypt, Airtel Money, Bank Transfer, Cash, Cheque
 
+import { lightAppColors } from '../theme/colors';
+
+const paymentColors = lightAppColors.payment;
+
 // Payment method definitions with Kenyan-specific details
 export const PAYMENT_METHODS = {
   mpesa: {
@@ -8,8 +12,8 @@ export const PAYMENT_METHODS = {
     provider: 'Safaricom',
     instructions: 'Lipa na M-Pesa: Paybill 123456',
     shortInstructions: 'Paybill 123456',
-    color: '#FFC72C',
-    textColor: '#000000',
+    color: paymentColors.yellow,
+    textColor: paymentColors.yellowText,
     icon: '💰',
     networks: ['safaricom'],
     fees: 'Free for most transactions',
@@ -21,8 +25,8 @@ export const PAYMENT_METHODS = {
     provider: 'Swypt',
     instructions: 'Pay securely via Swypt app',
     shortInstructions: 'Via Swypt app',
-    color: '#00B894',
-    textColor: '#FFFFFF',
+    color: paymentColors.green,
+    textColor: paymentColors.greenText,
     icon: '🔄',
     networks: ['all'],
     fees: 'Low transaction fees',
@@ -34,8 +38,8 @@ export const PAYMENT_METHODS = {
     provider: 'Airtel',
     instructions: 'Airtel Money: *247# or app',
     shortInstructions: '*247# or app',
-    color: '#E30613',
-    textColor: '#FFFFFF',
+    color: paymentColors.red,
+    textColor: paymentColors.redText,
     icon: '📱',
     networks: ['airtel'],
     fees: 'Standard Airtel Money fees',
@@ -47,8 +51,8 @@ export const PAYMENT_METHODS = {
     provider: 'Various Banks',
     instructions: 'Bank transfer to: Equity Bank 1234567890',
     shortInstructions: 'Bank transfer',
-    color: '#4A90E2',
-    textColor: '#FFFFFF',
+    color: paymentColors.blue,
+    textColor: paymentColors.blueText,
     icon: '🏦',
     networks: ['all'],
     fees: 'Bank charges apply',
@@ -60,8 +64,8 @@ export const PAYMENT_METHODS = {
     provider: 'In Person',
     instructions: 'Cash payment on viewing/property handover',
     shortInstructions: 'Cash on viewing',
-    color: '#7ED321',
-    textColor: '#FFFFFF',
+    color: paymentColors.lime,
+    textColor: paymentColors.limeText,
     icon: '💵',
     networks: ['all'],
     fees: 'No fees',
@@ -73,8 +77,8 @@ export const PAYMENT_METHODS = {
     provider: 'Bank Cheque',
     instructions: 'Bank cheque payable to HouseHunter Ltd',
     shortInstructions: 'Bank cheque',
-    color: '#9013FE',
-    textColor: '#FFFFFF',
+    color: paymentColors.purple,
+    textColor: paymentColors.purpleText,
     icon: '📄',
     networks: ['all'],
     fees: 'Bank charges may apply',

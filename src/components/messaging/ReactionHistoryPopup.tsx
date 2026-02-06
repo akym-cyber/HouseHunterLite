@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, Animated, StyleSheet, Platform, Dimensions } from 'react-native';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface ReactionHistoryPopupProps {
   reactions: { [emoji: string]: string[] };
@@ -19,6 +19,8 @@ const ReactionHistoryPopup: React.FC<ReactionHistoryPopupProps> = ({
   onAddReaction,
   position,
 }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -166,7 +168,7 @@ const ReactionItem: React.FC<ReactionItemProps> = ({ emoji, count, onPress }) =>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,
@@ -184,14 +186,14 @@ const styles = StyleSheet.create({
   },
   popup: {
     position: 'absolute',
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     minWidth: 180,
     maxWidth: 280,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.25,
         shadowRadius: 8,
@@ -211,19 +213,19 @@ const styles = StyleSheet.create({
   headerText: {
     fontSize: 16,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   closeButton: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeText: {
     fontSize: 16,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontWeight: 'bold',
   },
   reactionsGrid: {
@@ -242,7 +244,7 @@ const styles = StyleSheet.create({
   },
   count: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     fontWeight: '500',
   },
 });

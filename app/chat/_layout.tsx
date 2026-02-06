@@ -1,16 +1,17 @@
 import React from 'react';
 import { Stack } from 'expo-router';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 
 export default function ChatLayout() {
+  const { theme } = useTheme();
   return (
     <Stack
       screenOptions={{
         headerShown: true,
         headerStyle: {
-          backgroundColor: defaultTheme.colors.primary,
+          backgroundColor: theme.colors.primary,
         },
-        headerTintColor: defaultTheme.colors.onPrimary,
+        headerTintColor: theme.colors.onPrimary,
         headerTitleStyle: {
           fontWeight: 'bold',
         },

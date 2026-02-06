@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import { messageHelpers } from '../services/firebase/messageHelpers';
-import { Message, Conversation, Inquiry } from '../types/database';
+import { Message, Conversation, Inquiry, MessageMedia } from '../types/database';
 import { useAuth } from './useAuth';
-import { collection, query, where, onSnapshot, orderBy, limit, startAfter, DocumentSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from '../services/firebase/firebaseConfig';
 
 interface MessagesState {
@@ -15,8 +15,10 @@ interface MessagesState {
 interface SendMessageData {
   conversationId: string;
   content: string;
-  messageType?: 'text' | 'image' | 'file' | 'location';
+  messageType?: 'text' | 'image' | 'file' | 'location' | 'property_offer' | 'audio';
   attachmentUrl?: string;
+  media?: MessageMedia[];
+  propertyOfferId?: string;
 }
 
 export const useMessages = () => {
@@ -29,9 +31,10 @@ export const useMessages = () => {
   });
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
+  const deliveryListenersRef = useRef<Map<string, () => void>>(new Map());
 
   // Add console logs for returns
-  console.log('🔥 useMessages returning:', {
+  console.log('[useMessages] returning:', {
     conversationsCount: state.conversations.length,
     loading: state.loading,
     error: state.error,
@@ -42,11 +45,11 @@ export const useMessages = () => {
   // Real-time conversation listener
   useEffect(() => {
     if (!user) {
-      console.log('🔍 useMessages: No user, skipping conversation listener');
+      console.log('[useMessages] No user, skipping conversation listener');
       return;
     }
 
-    console.log('🔍 useMessages: Setting up conversation listener for user:', user.uid);
+    console.log('[useMessages] Setting up conversation listener for user:', user.uid);
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     const conversationsRef = collection(db, 'conversations');
@@ -59,26 +62,26 @@ export const useMessages = () => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('🔍 useMessages: conversations snapshot received, docs count:', snapshot.docs.length);
+      console.log('[useMessages] conversations snapshot received, docs count:', snapshot.docs.length);
 
       const conversations = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Conversation));
 
-      console.log('🔍 useMessages: conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
+      console.log('[useMessages] conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
 
       // Validate participants arrays
       conversations.forEach(conv => {
         if (!conv.participants || !Array.isArray(conv.participants)) {
-          console.warn('🔍 useMessages: Conversation missing valid participants array:', conv.id, conv.participants);
+          console.warn('[useMessages] Conversation missing valid participants array:', conv.id, conv.participants);
         }
       });
 
       // Sort conversations by last message time
       conversations.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
 
-      console.log('🔍 useMessages: sorted conversations count:', conversations.length);
+      console.log('[useMessages] sorted conversations count:', conversations.length);
 
       // Calculate unread count (conversations < 1 hour old)
       const unread = conversations.filter(conv =>
@@ -93,7 +96,7 @@ export const useMessages = () => {
         error: null,
       }));
     }, (error) => {
-      console.error('🔍 useMessages: Real-time conversations error:', error);
+      console.error('[useMessages] Real-time conversations error:', error);
       setState(prev => ({
         ...prev,
         loading: false,
@@ -104,6 +107,47 @@ export const useMessages = () => {
     return unsubscribe;
   }, [user]);
 
+
+  // Delivery receipts: mark inbound messages as delivered when receiver's app is active
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const activeConversationIds = new Set(state.conversations.map(conv => conv.id));
+
+    // Remove listeners for conversations no longer active
+    for (const [convId, unsubscribe] of deliveryListenersRef.current.entries()) {
+      if (!activeConversationIds.has(convId)) {
+        unsubscribe();
+        deliveryListenersRef.current.delete(convId);
+      }
+    }
+
+    // Add listeners for new conversations
+    state.conversations.forEach((conv) => {
+      if (deliveryListenersRef.current.has(conv.id)) return;
+
+      const messagesRef = collection(db, `conversations/${conv.id}/messages`);
+      const q = query(messagesRef, orderBy('created_at', 'desc'), limit(25));
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data() as Message;
+          if (data.sender_id !== user.uid && data.status !== 'delivered' && data.status !== 'read') {
+            messageHelpers.markMessageAsDelivered(conv.id, docSnap.id).catch(() => {});
+          }
+        });
+      });
+
+      deliveryListenersRef.current.set(conv.id, unsubscribe);
+    });
+
+    return () => {
+      for (const unsubscribe of deliveryListenersRef.current.values()) {
+        unsubscribe();
+      }
+      deliveryListenersRef.current.clear();
+    };
+  }, [state.conversations, user?.uid]);
   // Network status monitoring
   useEffect(() => {
     const checkConnection = async () => {
@@ -199,6 +243,8 @@ export const useMessages = () => {
         content: messageData.content,
         message_type: messageData.messageType || 'text',
         attachment_url: messageData.attachmentUrl,
+        media: messageData.media,
+        property_offer_id: messageData.propertyOfferId,
         is_read: false,
       });
 
@@ -226,8 +272,23 @@ export const useMessages = () => {
         return { success: false, error: 'User not authenticated' };
       }
 
+      const resolvedOwnerId = user.role === 'owner' ? user.uid : otherUserId;
+
+      const existingByOwner = await messageHelpers.findConversationByOwnerAndParticipants(
+        resolvedOwnerId,
+        user.uid,
+        otherUserId
+      );
+
+      if (existingByOwner.data) {
+        await messageHelpers.addConversationPropertyReference(existingByOwner.data.id, propertyId);
+        return { success: true, data: existingByOwner.data };
+      }
+
       const result = await messageHelpers.createConversation({
         property_id: propertyId,
+        ownerId: resolvedOwnerId,
+        propertyReferences: [propertyId],
         participants: [user.uid, otherUserId],
         createdBy: user.uid, // Track who created the conversation
         last_message_at: new Date().toISOString(),
@@ -257,8 +318,39 @@ export const useMessages = () => {
         return { success: false, error: 'User not authenticated' };
       }
 
-      const result = await messageHelpers.findConversationByPropertyAndParticipants(
-        propertyId,
+      const result = await messageHelpers.findConversationByOwnerAndParticipants(
+        otherUserId,
+        user.uid,
+        otherUserId
+      );
+
+      if (!result.data) {
+        const fallback = await messageHelpers.findConversationByPropertyAndParticipants(
+          propertyId,
+          user.uid,
+          otherUserId
+        );
+        return { success: true, data: fallback.data };
+      }
+
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      return { success: true, data: result.data };
+    } catch (error: any) {
+      return { success: false, error: 'Failed to find conversation' };
+    }
+  };
+
+  const findConversationByOwner = async (ownerId: string, otherUserId: string) => {
+    try {
+      if (!user) {
+        return { success: false, error: 'User not authenticated' };
+      }
+
+      const result = await messageHelpers.findConversationByOwnerAndParticipants(
+        ownerId,
         user.uid,
         otherUserId
       );
@@ -319,13 +411,72 @@ export const useMessages = () => {
       setState(prev => ({
         ...prev,
         messages: prev.messages.map(msg =>
-          msg.id === messageId ? { ...msg, is_read: true } : msg
+          msg.id === messageId ? { ...msg, is_read: true, status: 'read' } : msg
         ),
       }));
 
       return { success: true, data: result.data };
     } catch (error: any) {
       return { success: false, error: 'Failed to mark message as read' };
+    }
+  };
+
+  const deleteConversation = async (conversationId: string) => {
+    try {
+      const result = await messageHelpers.deleteConversation(conversationId);
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      setState(prev => ({
+        ...prev,
+        conversations: prev.conversations.filter(conv => conv.id !== conversationId),
+        messages: prev.messages.filter(msg => msg.conversation_id !== conversationId),
+      }));
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: 'Failed to delete conversation' };
+    }
+  };
+
+  const deleteMessageForMe = async (conversationId: string, messageId: string, userId: string) => {
+    try {
+      const result = await messageHelpers.deleteMessageForMe(conversationId, messageId, userId);
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      setState(prev => ({
+        ...prev,
+        messages: prev.messages.filter(msg => msg.id !== messageId),
+      }));
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: 'Failed to delete message' };
+    }
+  };
+
+  const deleteMessageForEveryone = async (conversationId: string, messageId: string, userId: string) => {
+    try {
+      const result = await messageHelpers.deleteMessageForEveryone(conversationId, messageId, userId);
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      setState(prev => ({
+        ...prev,
+        messages: prev.messages.map(msg =>
+          msg.id === messageId
+            ? { ...msg, deleted_for_everyone: true, deleted_by: userId, content: '' }
+            : msg
+        ),
+      }));
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: 'Failed to delete message' };
     }
   };
 
@@ -349,9 +500,14 @@ export const useMessages = () => {
     sendMessage,
     createConversation,
     findConversationByProperty,
+    findConversationByOwner,
     sendInquiry,
     markMessageAsRead,
+    deleteConversation,
+    deleteMessageForMe,
+    deleteMessageForEveryone,
     refreshConversations,
     clearMessages,
   };
 };
+

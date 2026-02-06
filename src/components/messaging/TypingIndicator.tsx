@@ -1,8 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Animated, StyleSheet, Platform } from 'react-native';
+import { useTheme } from '../../theme/useTheme';
 
 // Animated typing indicator with three bouncing dots
 const TypingIndicator: React.FC = () => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const dot1Anim = useRef(new Animated.Value(0)).current;
   const dot2Anim = useRef(new Animated.Value(0)).current;
   const dot3Anim = useRef(new Animated.Value(0)).current;
@@ -63,9 +66,21 @@ const TypingIndicator: React.FC = () => {
   }, [dot1Anim, dot2Anim, dot3Anim, glowAnim]);
 
   // Interpolate glow animation to background color
+  const toRgba = (hexColor: string, alpha: number) => {
+    const hex = hexColor.replace('#', '');
+    const bigint = parseInt(hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
   const backgroundColor = glowAnim.interpolate({
     inputRange: [0.3, 0.6],
-    outputRange: ['rgba(229, 229, 234, 0.8)', 'rgba(229, 229, 234, 1.0)'], // Subtle opacity change
+    outputRange: [
+      toRgba(theme.app.chatTypingBubble, 0.8),
+      toRgba(theme.app.chatTypingBubble, 1.0),
+    ],
   });
 
   return (
@@ -81,7 +96,7 @@ const TypingIndicator: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     marginVertical: Platform.select({
       ios: 4,
@@ -92,7 +107,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   bubble: {
-    backgroundColor: '#E5E5EA', // Same color as other user messages
+    backgroundColor: theme.app.chatTypingBubble,
     borderRadius: 18,
     paddingHorizontal: Platform.select({
       ios: 12,
@@ -114,7 +129,7 @@ const styles = StyleSheet.create({
     // Subtle elevation
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 2,
@@ -134,7 +149,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#666666', // Gray dots
+    backgroundColor: theme.app.chatTypingDot,
     marginHorizontal: 2,
   },
 });

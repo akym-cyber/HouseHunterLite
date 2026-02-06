@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, Text, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, Text, StyleSheet } from 'react-native';
+import { useTheme } from '../../theme/useTheme';
 
 interface FloatingReactionProps {
   emoji: string;
@@ -14,6 +15,8 @@ const FloatingReaction: React.FC<FloatingReactionProps> = ({
   startY,
   onComplete,
 }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(0.5)).current;
   const translateXAnim = useRef(new Animated.Value(0)).current;
@@ -86,14 +89,14 @@ const FloatingReaction: React.FC<FloatingReactionProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     position: 'absolute',
     zIndex: 3000,
   },
   emoji: {
     fontSize: 28,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowColor: theme.app.emojiShadow,
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },

@@ -1,12 +1,12 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { useTheme } from 'react-native-paper';
+import { useTheme } from '../../src/theme/useTheme';
 import { TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMessages } from '../../src/hooks/useMessages';
 
 export default function TabsLayout() {
-  const theme = useTheme();
+  const { theme } = useTheme();
   const { unreadCount } = useMessages();
 
   const CustomTabButton = (props) => {

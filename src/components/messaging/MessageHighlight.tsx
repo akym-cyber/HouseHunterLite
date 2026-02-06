@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Platform } from 'react-native';
+import { useTheme } from '../../theme/useTheme';
 
 interface MessageHighlightProps {
   isHighlighted: boolean;
@@ -14,6 +15,7 @@ const MessageHighlight: React.FC<MessageHighlightProps> = ({
   isImportant = false,
   children,
 }) => {
+  const { theme } = useTheme();
   const glowAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const colorAnim = useRef(new Animated.Value(0)).current;
@@ -71,13 +73,22 @@ const MessageHighlight: React.FC<MessageHighlightProps> = ({
     }
   }, [isHighlighted, isMention, isImportant, glowAnim, scaleAnim, colorAnim]);
 
+  const toRgba = (hexColor: string, alpha: number) => {
+    const hex = hexColor.replace('#', '');
+    const bigint = parseInt(hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
   // Interpolate color for mention highlights
   const backgroundColor = colorAnim.interpolate({
     inputRange: [0, 1, 2],
     outputRange: [
       'transparent', // Normal
-      'rgba(255, 193, 7, 0.15)', // Mention (yellow tint)
-      'rgba(244, 67, 54, 0.1)', // Important (red tint)
+      toRgba(theme.app.highlight.mention, 0.15),
+      toRgba(theme.app.highlight.important, 0.1),
     ],
   });
 
@@ -102,7 +113,7 @@ const MessageHighlight: React.FC<MessageHighlightProps> = ({
               }),
               shadowColor: colorAnim.interpolate({
                 inputRange: [0, 1, 2],
-                outputRange: ['transparent', '#FFC107', '#F44336'],
+                outputRange: ['transparent', theme.app.highlight.mention, theme.app.highlight.important],
               }),
             },
             android: {

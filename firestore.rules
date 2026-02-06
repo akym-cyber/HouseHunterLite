@@ -2,65 +2,461 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users collection - basic read/write for authenticated users
-    match /users/{userId} {
-      // Allow authenticated users to read/write their own profile
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // ---------- Helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Properties collection
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return request.auth.uid in get(
+        /databases/$(database)/documents/conversations/$(conversationId)
+      ).data.participants
+      || get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1_id == request.auth.uid
+      || get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2_id == request.auth.uid;
+    }
+
+    // ---------- Application validation ----------
+    function isValidApplicationStatus(status) {
+      return status in ['pending', 'approved', 'rejected', 'needs_info', 'withdrawn'];
+    }
+
+    function isTenantStatus(status) {
+      return status in ['pending', 'withdrawn'];
+    }
+
+    function isOwnerStatus(status) {
+      return status in ['approved', 'rejected', 'needs_info'];
+    }
+
+    function hasRequiredApplicationFields(data) {
+      return data.keys().hasAll([
+        'propertyId',
+        'tenantId',
+        'ownerId',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function hasOnlyAllowedApplicationFields(data) {
+      return data.keys().hasOnly([
+        'propertyId',
+        'tenantId',
+        'ownerId',
+        'status',
+        'createdAt',
+        'updatedAt',
+        'message',
+        'decisionNotes',
+        'decisionDate'
+      ]);
+    }
+
+    function hasValidApplicationTypes(data) {
+      return data.propertyId is string
+        && data.tenantId is string
+        && data.ownerId is string
+        && data.status is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('message' in data) || data.message is string)
+        && (!('decisionNotes' in data) || data.decisionNotes is string)
+        && (!('decisionDate' in data) || data.decisionDate is timestamp);
+    }
+
+    function hasValidApplicationRefs(data) {
+      return exists(/databases/$(database)/documents/properties/$(data.propertyId))
+        && exists(/databases/$(database)/documents/users/$(data.tenantId))
+        && exists(/databases/$(database)/documents/users/$(data.ownerId))
+        && get(/databases/$(database)/documents/properties/$(data.propertyId)).data.ownerId == data.ownerId;
+    }
+
+    // ---------- Property validation (matches current app schema) ----------
+    function isValidPropertyStatus(status) {
+      return status in ['available', 'rented', 'unavailable', 'pending'];
+    }
+
+    function isValidPropertyType(type) {
+      return type in ['apartment', 'house', 'studio', 'townhouse', 'condo', 'loft'];
+    }
+
+    function hasRequiredPropertyFields(data) {
+      return data.keys().hasAll([
+        'ownerId',
+        'title',
+        'propertyType',
+        'addressLine1',
+        'city',
+        'price',
+        'bedrooms',
+        'bathrooms',
+        'furnished',
+        'petFriendly',
+        'parkingAvailable',
+        'utilitiesIncluded',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function hasValidPropertyTypes(data) {
+      return data.ownerId is string
+        && data.title is string
+        && data.propertyType is string
+        && data.addressLine1 is string
+        && data.city is string
+        && data.price is number
+        && data.price > 0
+        && data.bedrooms is number
+        && data.bathrooms is number
+        && data.furnished is bool
+        && data.petFriendly is bool
+        && data.parkingAvailable is bool
+        && data.utilitiesIncluded is bool
+        && data.status is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('description' in data) || data.description is string)
+        && (!('addressLine2' in data) || data.addressLine2 is string)
+        && (!('state' in data) || data.state is string)
+        && (!('postalCode' in data) || data.postalCode is string)
+        && (!('country' in data) || data.country is string)
+        && (!('latitude' in data) || data.latitude is number)
+        && (!('longitude' in data) || data.longitude is number)
+        && (!('deposit' in data) || data.deposit is number)
+        && (!('squareFeet' in data) || data.squareFeet is number)
+        && (!('amenities' in data) || data.amenities is list)
+        && (!('availableDate' in data) || data.availableDate is timestamp || data.availableDate is string)
+        && (!('county' in data) || data.county is string)
+        && (!('constituency' in data) || data.constituency is string)
+        && (!('ward' in data) || data.ward is string)
+        && (!('estate' in data) || data.estate is string)
+        && (!('building' in data) || data.building is string)
+        && (!('media' in data) || data.media is list)
+        && (!('primaryImageUrl' in data) || data.primaryImageUrl is string)
+        && (!('viewingDays' in data) || data.viewingDays is list)
+        && (!('viewingTimeSlots' in data) || data.viewingTimeSlots is list)
+        && (!('blockedDates' in data) || data.blockedDates is list);
+    }
+
+    function hasValidPropertyRefs(data) {
+      return exists(/databases/$(database)/documents/users/$(data.ownerId));
+    }
+
+    // ---------- Viewing validation (matches current app schema) ----------
+    function isValidViewingStatus(status) {
+      return status in ['pending', 'confirmed', 'cancelled', 'completed', 'declined'];
+    }
+
+    function isValidViewingType(type) {
+      return type in ['in_person', 'virtual', 'self_guided'];
+    }
+
+    function hasRequiredViewingFields(data) {
+      return data.keys().hasAll([
+        'propertyId',
+        'tenantId',
+        'ownerId',
+        'scheduledAt',
+        'timeSlot',
+        'viewingType',
+        'status',
+        'contactName',
+        'contactEmail',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function hasValidViewingTypes(data) {
+      return data.propertyId is string
+        && data.tenantId is string
+        && data.ownerId is string
+        && data.scheduledAt is timestamp
+        && data.timeSlot is string
+        && data.viewingType is string
+        && data.status is string
+        && data.contactName is string
+        && data.contactEmail is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('contactPhone' in data) || data.contactPhone is string)
+        && (!('notes' in data) || data.notes is string);
+    }
+
+    function hasValidViewingRefs(data) {
+      return exists(/databases/$(database)/documents/properties/$(data.propertyId))
+        && exists(/databases/$(database)/documents/users/$(data.tenantId))
+        && exists(/databases/$(database)/documents/users/$(data.ownerId))
+        && get(/databases/$(database)/documents/properties/$(data.propertyId)).data.ownerId == data.ownerId;
+    }
+
+    // ---------- Message validation (subcollection) ----------
+    function isValidMessageType(type) {
+      return type in ['text', 'image', 'file', 'location'];
+    }
+
+    function hasRequiredMessageFields(data) {
+      return data.keys().hasAll(['sender_id', 'content', 'message_type', 'created_at']);
+    }
+
+    function hasValidMessageTypes(data) {
+      return data.sender_id is string
+        && data.content is string
+        && data.message_type is string
+        && data.created_at is timestamp
+        && (!('attachment_url' in data) || data.attachment_url is string || data.attachment_url == null)
+        && (!('is_read' in data) || data.is_read is bool)
+        && (!('deleted_for' in data) || data.deleted_for is list)
+        && (!('deleted_for_everyone' in data) || data.deleted_for_everyone is bool)
+        && (!('deleted_by' in data) || data.deleted_by is string)
+        && (!('deleted_at' in data) || data.deleted_at is timestamp)
+        && (!('reply_to' in data) || data.reply_to is string)
+        && (!('status' in data) || data.status is string)
+        && (!('media' in data) || data.media is list);
+    }
+
+    function hasMessageBody(data) {
+      return data.content.size() > 0
+        || ('attachment_url' in data && data.attachment_url is string)
+        || ('media' in data && data.media is list);
+    }
+
+    // ---------- Collections ----------
+
+    // Properties
     match /properties/{propertyId} {
-      // Allow anyone to read properties (for browsing)
-      allow read: if true;
+      allow read: if isSignedIn();
 
-      // Only authenticated property owners can create/update/delete their properties
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerId;
-      allow update, delete: if request.auth != null &&
-                               request.auth.uid == get(/databases/$(database)/documents/properties/$(propertyId)).data.ownerId;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && hasRequiredPropertyFields(request.resource.data)
+        && hasValidPropertyTypes(request.resource.data)
+        && hasValidPropertyRefs(request.resource.data)
+        && isValidPropertyType(request.resource.data.propertyType)
+        && isValidPropertyStatus(request.resource.data.status);
+
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && hasRequiredPropertyFields(request.resource.data)
+        && hasValidPropertyTypes(request.resource.data)
+        && hasValidPropertyRefs(request.resource.data)
+        && isValidPropertyType(request.resource.data.propertyType)
+        && isValidPropertyStatus(request.resource.data.status)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt != resource.data.updatedAt;
+
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
     }
 
-    // User-scoped favorites subcollection
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+
+    // Favorites
     match /users/{userId}/favorites/{favoriteId} {
-      // Users can only manage their own favorites
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isSignedIn() && isOwner(userId);
     }
 
-    // Conversations collection
+    // Conversations
     match /conversations/{conversationId} {
-      // Allow read if user is in participants array
-      allow read: if request.auth != null &&
-                     resource.data.participants.hasAny([request.auth.uid]);
+      allow read: if isSignedIn()
+        && (
+          request.auth.uid in resource.data.participants
+          || resource.data.participant1_id == request.auth.uid
+          || resource.data.participant2_id == request.auth.uid
+        );
 
-      // Allow create for authenticated users (validation happens in code)
-      allow create: if request.auth != null;
+      allow create: if isSignedIn()
+        && (
+          request.auth.uid in request.resource.data.participants
+          || request.resource.data.participant1_id == request.auth.uid
+          || request.resource.data.participant2_id == request.auth.uid
+        );
 
-      // Allow update for participants only
-      allow update: if request.auth != null &&
-                       resource.data.participants.hasAny([request.auth.uid]);
+      allow update, delete: if isSignedIn()
+        && (
+          request.auth.uid in resource.data.participants
+          || resource.data.participant1_id == request.auth.uid
+          || resource.data.participant2_id == request.auth.uid
+        );
     }
 
-    // Messages subcollection under conversations
+    // Messages
     match /conversations/{conversationId}/messages/{messageId} {
-      // Allow read/write for conversation participants
-      allow read, write: if request.auth != null &&
-                            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]);
+      allow read: if isSignedIn() && isConversationParticipant(conversationId);
+
+      allow create: if isSignedIn()
+        && isConversationParticipant(conversationId)
+        && hasRequiredMessageFields(request.resource.data)
+        && hasValidMessageTypes(request.resource.data)
+        && isValidMessageType(request.resource.data.message_type)
+        && request.resource.data.sender_id == request.auth.uid
+        && hasMessageBody(request.resource.data);
+
+      allow update: if isSignedIn()
+        && isConversationParticipant(conversationId)
+        && hasRequiredMessageFields(request.resource.data)
+        && hasValidMessageTypes(request.resource.data)
+        && isValidMessageType(request.resource.data.message_type)
+        && request.resource.data.sender_id == resource.data.sender_id
+        && request.resource.data.created_at == resource.data.created_at
+        && (
+          // Allow edits only within 5 minutes if content/media changes
+          (
+            (request.resource.data.content != resource.data.content
+              || request.resource.data.attachment_url != resource.data.attachment_url
+              || request.resource.data.media != resource.data.media)
+            && request.time < resource.data.created_at + duration.value(5, 'm')
+          )
+          // Otherwise allow metadata updates (read/deleted) anytime
+          || (
+            request.resource.data.content == resource.data.content
+            && request.resource.data.attachment_url == resource.data.attachment_url
+            && request.resource.data.media == resource.data.media
+          )
+        );
+
+      allow delete: if isSignedIn() && isConversationParticipant(conversationId);
     }
 
-    // Inquiries collection
+    // Inquiries
     match /inquiries/{inquiryId} {
-      // Allow property owners to read inquiries for their properties
-      allow read: if request.auth != null &&
-                     (request.auth.uid == resource.data.owner_id ||
-                      request.auth.uid == resource.data.tenant_id);
+      allow read: if isSignedIn()
+        && (
+          request.auth.uid == resource.data.owner_id
+          || request.auth.uid == resource.data.tenant_id
+        );
 
-      // Allow tenants to create inquiries
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.tenant_id;
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.tenant_id;
 
-      // Allow property owners to update inquiry status
-      allow update: if request.auth != null && request.auth.uid == resource.data.owner_id;
+      allow update: if isSignedIn()
+        && request.auth.uid == resource.data.owner_id;
     }
 
-    // Default deny for any other collections
+    // Applications (STRICT VALIDATION)
+    match /applications/{applicationId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId);
+
+      allow create: if isSignedIn()
+        && request.resource.data.tenantId == request.auth.uid
+        && hasRequiredApplicationFields(request.resource.data)
+        && hasOnlyAllowedApplicationFields(request.resource.data)
+        && hasValidApplicationTypes(request.resource.data)
+        && hasValidApplicationRefs(request.resource.data)
+        && isValidApplicationStatus(request.resource.data.status)
+        && isTenantStatus(request.resource.data.status);
+
+      allow update: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId)
+        && hasRequiredApplicationFields(request.resource.data)
+        && hasOnlyAllowedApplicationFields(request.resource.data)
+        && hasValidApplicationTypes(request.resource.data)
+        && hasValidApplicationRefs(request.resource.data)
+        && request.resource.data.propertyId == resource.data.propertyId
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt != resource.data.updatedAt
+        && isValidApplicationStatus(request.resource.data.status)
+        && (
+          (request.auth.uid == resource.data.tenantId
+            && isTenantStatus(request.resource.data.status))
+          || (request.auth.uid == resource.data.ownerId
+            && isOwnerStatus(request.resource.data.status))
+        );
+
+      allow delete: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId);
+    }
+
+    // Saved properties
+    match /saved_properties/{savedId} {
+      allow read, write: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow read, write: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId)
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    // Documents
+    match /documents/{documentId} {
+      allow read, write: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && (request.resource.data.userId == request.auth.uid
+          || request.resource.data.actorId == request.auth.uid);
+
+      allow update, delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Viewings (STRICT VALIDATION)
+    match /viewings/{viewingId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId);
+
+      allow create: if isSignedIn()
+        && request.resource.data.tenantId == request.auth.uid
+        && hasRequiredViewingFields(request.resource.data)
+        && hasValidViewingTypes(request.resource.data)
+        && hasValidViewingRefs(request.resource.data)
+        && isValidViewingStatus(request.resource.data.status)
+        && isValidViewingType(request.resource.data.viewingType)
+        && request.resource.data.scheduledAt > request.time;
+
+      allow update: if isSignedIn()
+        && (request.auth.uid == resource.data.tenantId
+          || request.auth.uid == resource.data.ownerId)
+        && hasRequiredViewingFields(request.resource.data)
+        && hasValidViewingTypes(request.resource.data)
+        && hasValidViewingRefs(request.resource.data)
+        && isValidViewingStatus(request.resource.data.status)
+        && isValidViewingType(request.resource.data.viewingType)
+        && request.resource.data.propertyId == resource.data.propertyId
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt != resource.data.updatedAt
+        && (
+          !(request.resource.data.status in ['pending', 'confirmed'])
+          || request.resource.data.scheduledAt > request.time
+        );
+    }
+
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }

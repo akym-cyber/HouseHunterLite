@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,7 +18,7 @@ import {
 } from 'react-native-paper';
 import { Property } from '../../types/database';
 import { useAuth } from '../../hooks/useAuth';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface PropertyBotProps {
   property?: Property;
@@ -189,7 +189,9 @@ export default function PropertyBot({
   visible,
   onDismiss,
 }: PropertyBotProps) {
+  const { theme } = useTheme();
   const { user } = useAuth();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [suggestedResponses, setSuggestedResponses] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -353,7 +355,7 @@ export default function PropertyBot({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   modal: {
     margin: 20,
     maxHeight: '80%',
@@ -364,7 +366,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
     marginBottom: 12,
   },
   quickResponses: {
@@ -381,13 +383,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: defaultTheme.colors.outline,
+    borderColor: theme.colors.outline,
     marginBottom: 8,
   },
   quickButtonText: {
     fontSize: 12,
     textAlign: 'center',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
     marginTop: 4,
   },
   divider: {
@@ -401,16 +403,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   suggestionItem: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderLeftWidth: 3,
-    borderLeftColor: defaultTheme.colors.primary,
+    borderLeftColor: theme.colors.primary,
   },
   suggestionText: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     lineHeight: 20,
   },
   faqCategories: {
@@ -425,7 +427,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   kenyanNote: {
-    backgroundColor: defaultTheme.colors.primaryContainer,
+    backgroundColor: theme.colors.primaryContainer,
     padding: 16,
     borderRadius: 8,
     marginTop: 16,
@@ -433,12 +435,12 @@ const styles = StyleSheet.create({
   kenyanTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: defaultTheme.colors.onPrimaryContainer,
+    color: theme.colors.onPrimaryContainer,
     marginBottom: 8,
   },
   kenyanText: {
     fontSize: 12,
-    color: defaultTheme.colors.onPrimaryContainer,
+    color: theme.colors.onPrimaryContainer,
     lineHeight: 18,
   },
 });

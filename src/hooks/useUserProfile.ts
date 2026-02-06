@@ -14,6 +14,7 @@ export interface UserProfile {
   email: string;
   photoURL?: string;
   role?: 'owner' | 'tenant';
+  shareContactInfo?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +59,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
             email: userData.email || firebaseUser.email || '',
             photoURL: photoURLFromFirestore,
             role: userData.role || 'tenant',
+            shareContactInfo: userData.shareContactInfo ?? true,
             createdAt: userData.createdAt || new Date().toISOString(),
             updatedAt: userData.updatedAt || new Date().toISOString(),
           });
@@ -70,6 +72,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
             email: firebaseUser.email || '',
             photoURL: firebaseUser.photoURL || null,
             role: 'tenant',
+            shareContactInfo: true,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -93,6 +96,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
           email: firebaseUser.email || '',
           photoURL: firebaseUser.photoURL || undefined,
           role: 'tenant',
+          shareContactInfo: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -141,6 +145,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
           email: userData.email || firebaseUser.email || '',
           photoURL: newPhotoURL,
           role: userData.role || 'tenant',
+          shareContactInfo: userData.shareContactInfo ?? true,
           createdAt: userData.createdAt || new Date().toISOString(),
           updatedAt: userData.updatedAt || new Date().toISOString(),
         });
@@ -164,7 +169,9 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
     };
   }, [firebaseUser, profile?.photoURL]);
 
-  const updateUserProfile = async (updates: Partial<Pick<UserProfile, 'name' | 'role'>>) => {
+  const updateUserProfile = async (
+    updates: Partial<Pick<UserProfile, 'name' | 'role' | 'shareContactInfo'>>
+  ) => {
     if (!firebaseUser || !profile) return { success: false, error: 'No user logged in' };
 
     try {

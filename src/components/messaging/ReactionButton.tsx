@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { TouchableOpacity, Text, Animated, StyleSheet, Platform } from 'react-native';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface ReactionButtonProps {
   emoji: string;
@@ -9,6 +9,8 @@ interface ReactionButtonProps {
 }
 
 const ReactionButton: React.FC<ReactionButtonProps> = ({ emoji, count, messageId }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [previousCount, setPreviousCount] = useState(count);
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -52,9 +54,9 @@ const ReactionButton: React.FC<ReactionButtonProps> = ({ emoji, count, messageId
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   reaction: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     paddingHorizontal: Platform.select({
       ios: 8,
       android: 6,
@@ -71,7 +73,7 @@ const styles = StyleSheet.create({
     // Subtle elevation for reactions too
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 1,
@@ -88,7 +90,7 @@ const styles = StyleSheet.create({
       android: 11,
       default: 11,
     }),
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
 });
 

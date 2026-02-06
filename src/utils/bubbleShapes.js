@@ -1,10 +1,11 @@
 import { StyleSheet, Platform } from 'react-native';
+import { lightAppColors } from '../theme/colors';
 
 // Instagram-style message bubble shapes with tails
 // Uses CSS border tricks to create triangular tails without SVG
 // Colors match the app's existing theme (#007AFF for sent, #E9E9EB for received)
 
-export const createBubbleStyles = (bubbleColor = '#007AFF') => {
+export const createBubbleStyles = (bubbleColor = lightAppColors.chatBubbleSent) => {
   return StyleSheet.create({
     // Base bubble styles
     bubble: {
@@ -87,12 +88,12 @@ export const createBubbleStyles = (bubbleColor = '#007AFF') => {
 
 // App's existing theme colors
 export const appBubbleThemes = {
-  sent: createBubbleStyles('#007AFF'), // App's sent message color
-  received: createBubbleStyles('#E9E9EB'), // App's received message color
+  sent: createBubbleStyles(lightAppColors.chatBubbleSent),
+  received: createBubbleStyles(lightAppColors.chatBubbleReceived),
 };
 
 // Helper function to get bubble styles based on message type
 export const getBubbleStyle = (isOwnMessage, customColor) => {
-  const color = customColor || (isOwnMessage ? '#007AFF' : '#E9E9EB');
+  const color = customColor || (isOwnMessage ? lightAppColors.chatBubbleSent : lightAppColors.chatBubbleReceived);
   return createBubbleStyles(color);
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,7 +17,7 @@ import {
   Avatar,
 } from 'react-native-paper';
 import { Property } from '../../types/database';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 import { formatKes } from '../../services/payments/mpesaService';
 
 const { width } = Dimensions.get('window');
@@ -41,6 +41,8 @@ export default function PropertyContextSidebar({
   onMakePayment,
   compact = false,
 }: PropertyContextSidebarProps) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(compact, theme), [compact, theme]);
   const primaryImage = property.media?.find(m => m.isPrimary) ||
                       property.media?.[0] ||
                       { url: property.primaryImageUrl };
@@ -258,7 +260,7 @@ export default function PropertyContextSidebar({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isCompact: boolean, theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     margin: 8,
     elevation: 4,
@@ -289,13 +291,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 12,
     right: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: theme.app.overlayStrong,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
   },
   priceText: {
-    color: 'white',
+    color: theme.app.iconOnDark,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -305,11 +307,11 @@ const styles = StyleSheet.create({
   compactTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   compactPrice: {
     fontSize: 14,
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     fontWeight: '600',
   },
   detailsContainer: {
@@ -323,12 +325,12 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   detailValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   divider: {
     marginVertical: 16,
@@ -343,7 +345,7 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
     marginLeft: 8,
   },
   amenitiesContainer: {
@@ -363,7 +365,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
     marginBottom: 12,
   },
   descriptionContainer: {
@@ -371,7 +373,7 @@ const styles = StyleSheet.create({
   },
   descriptionText: {
     fontSize: 14,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     lineHeight: 20,
   },
   actionsContainer: {
@@ -382,10 +384,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   paymentButton: {
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   kenyanInfo: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     padding: 16,
     borderRadius: 8,
     marginTop: 16,
@@ -393,12 +395,12 @@ const styles = StyleSheet.create({
   kenyanTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 8,
   },
   kenyanText: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 4,
     lineHeight: 18,
   },

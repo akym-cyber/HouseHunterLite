@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,10 +18,11 @@ import {
 } from 'react-native-paper';
 import { Link, router } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { VALIDATION_RULES, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../../src/utils/constants';
 
 export default function LoginScreen() {
+  const { theme } = useTheme();
   const { signIn, loading, error } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -87,6 +88,8 @@ export default function LoginScreen() {
   const handleForgotPassword = () => {
     router.push('/(auth)/forgot-password');
   };
+
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <KeyboardAvoidingView
@@ -180,10 +183,10 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   scrollContent: {
     flexGrow: 1,
@@ -206,12 +209,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
   },
   subtitle: {
     textAlign: 'center',
     marginBottom: 32,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   input: {
     marginBottom: 8,
@@ -233,11 +236,11 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: defaultTheme.colors.outline,
+    backgroundColor: theme.colors.outline,
   },
   dividerText: {
     marginHorizontal: 16,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   registerContainer: {
     flexDirection: 'row',
@@ -245,10 +248,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   registerText: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   registerLink: {
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     fontWeight: 'bold',
   },
-}); 
+});

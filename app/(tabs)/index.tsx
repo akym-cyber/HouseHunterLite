@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   RefreshControl,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import {
   Text,
@@ -21,12 +22,14 @@ import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useUserProfile } from '../../src/hooks/useUserProfile';
 import { useProperties } from '../../src/hooks/useProperties';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
 
 export default function HomeScreen() {
+  const { theme } = useTheme();
   const { user } = useAuth();
   const { profile } = useUserProfile(user);
   const { properties, loading, refreshProperties } = useProperties();
@@ -92,17 +95,23 @@ export default function HomeScreen() {
     }
   };
 
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const renderPropertyCard = (property: Property) => (
     <Card
       key={property.id}
       style={styles.propertyCard}
-      onPress={() => handleViewProperty(property.id)}
     >
-      <Card.Cover
-        source={{ uri: 'https://via.placeholder.com/300x200?text=Property+Image' }}
-        style={styles.propertyImage}
+      <PropertyMediaCarousel
+        primaryImageUrl={property.primaryImageUrl}
+        media={property.media}
+        borderRadius={8}
       />
-      <Card.Content style={styles.propertyContent}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => handleViewProperty(property.id)}
+      >
+        <Card.Content style={styles.propertyContent}>
         <Title style={styles.propertyTitle} numberOfLines={1}>
           {property.title}
         </Title>
@@ -121,6 +130,7 @@ export default function HomeScreen() {
           </Chip>
         </View>
       </Card.Content>
+      </TouchableOpacity>
     </Card>
   );
 
@@ -279,10 +289,10 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   scrollView: {
     flex: 1,
@@ -293,20 +303,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     paddingTop: 40,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   headerContent: {
     flex: 1,
   },
   greeting: {
     fontSize: 16,
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     opacity: 0.8,
   },
   userName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: defaultTheme.colors.onPrimary,
+    color: theme.colors.onPrimary,
     marginTop: 4,
   },
   roleChip: {
@@ -314,7 +324,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   avatar: {
-    backgroundColor: defaultTheme.colors.onPrimary,
+    backgroundColor: theme.colors.onPrimary,
   },
   quickActionsCard: {
     margin: 20,
@@ -335,10 +345,10 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   sectionSubtitle: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 16,
   },
   actionButton: {
@@ -352,11 +362,6 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderRadius: 8,
   },
-  propertyImage: {
-    height: 150,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-  },
   propertyContent: {
     padding: 16,
   },
@@ -366,7 +371,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   propertyLocation: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 8,
   },
   propertyDetails: {
@@ -398,7 +403,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 20,
   },
   emptyButton: {
@@ -415,11 +420,11 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
   },
   statLabel: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginTop: 4,
   },
   fab: {
@@ -427,7 +432,7 @@ const styles = StyleSheet.create({
     margin: 16,
     right: 0,
     bottom: 0,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -443,3 +448,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+
+
+

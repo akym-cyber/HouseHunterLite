@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { View, TouchableOpacity, Text, Animated, StyleSheet, Platform, Dimensions } from 'react-native';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 
 interface FloatingQuickReplyProps {
   isVisible: boolean;
@@ -27,6 +27,8 @@ const FloatingQuickReply: React.FC<FloatingQuickReplyProps> = ({
   onForward,
   onClose,
 }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [buttons, setButtons] = useState<QuickReplyButton[]>([]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
@@ -43,26 +45,26 @@ const FloatingQuickReply: React.FC<FloatingQuickReplyProps> = ({
           label: '👍',
           emoji: '👍',
           action: () => onReaction('👍'),
-          color: '#2196F3',
+          color: theme.app.reactions.approve,
         },
         {
           id: 'laugh',
           label: '😂',
           emoji: '😂',
           action: () => onReaction('😂'),
-          color: '#FF9800',
+          color: theme.app.reactions.laugh,
         },
         {
           id: 'reply',
           label: 'Reply',
           action: onReply,
-          color: defaultTheme.colors.primary,
+          color: theme.colors.primary,
         },
         {
           id: 'forward',
           label: 'Forward',
           action: onForward,
-          color: '#9C27B0',
+          color: theme.app.reactions.surprise,
         },
       ];
 
@@ -110,7 +112,7 @@ const FloatingQuickReply: React.FC<FloatingQuickReplyProps> = ({
         setButtons([]);
       });
     }
-  }, [isVisible, fadeAnim, slideAnim, bounceAnim]);
+  }, [isVisible, fadeAnim, slideAnim, bounceAnim, onReply, onReaction, onForward, theme]);
 
   if (!isVisible || buttons.length === 0) return null;
 
@@ -220,7 +222,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({ button, delay, onPress 
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,
@@ -238,14 +240,14 @@ const styles = StyleSheet.create({
   },
   container: {
     position: 'absolute',
-    backgroundColor: defaultTheme.colors.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 16,
     minWidth: 200,
     maxWidth: 280,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.25,
         shadowRadius: 8,
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: theme.app.shadow,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
         shadowRadius: 4,
@@ -283,7 +285,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontSize: 18,
-    color: '#FFFFFF',
+    color: theme.app.iconOnDark,
     fontWeight: '600',
   },
 });

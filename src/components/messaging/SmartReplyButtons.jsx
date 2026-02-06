@@ -1,8 +1,8 @@
 // Kenyan Smart Reply Buttons Component
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Chip } from 'react-native-paper';
-import { getPaymentMethod } from '../../utils/paymentMethods.js';
+import { useTheme } from '../../theme/useTheme';
 
 const SmartReplyButtons = ({
   replies = [],
@@ -11,6 +11,8 @@ const SmartReplyButtons = ({
   detectedContext = {},
   style = {}
 }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   // Don't render if no replies or still loading
   if (isLoading || !replies.length) {
     return null;
@@ -79,13 +81,21 @@ const SmartReplyButtons = ({
 
 // Loading state component
 export const SmartReplyLoading = ({ message = 'Thinking...' }) => (
-  <View style={styles.loadingContainer}>
-    <ActivityIndicator size="small" color="#007AFF" />
-    <Text style={styles.loadingText}>{message}</Text>
-  </View>
+  <SmartReplyLoadingInner message={message} />
 );
 
-const styles = StyleSheet.create({
+const SmartReplyLoadingInner = ({ message }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  return (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="small" color={theme.app.chatBubbleSent} />
+      <Text style={styles.loadingText}>{message}</Text>
+    </View>
+  );
+};
+
+const createStyles = (theme) => StyleSheet.create({
   container: {
     marginVertical: 8,
     marginHorizontal: 16,
@@ -107,29 +117,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   defaultReply: {
-    backgroundColor: '#F8F9FA',
-    borderColor: '#E0E0E0',
+    backgroundColor: theme.app.smartReplyBackground,
+    borderColor: theme.app.border,
   },
   mpesaReply: {
-    backgroundColor: '#FFC72C',
-    borderColor: '#FFC72C',
-    textColor: '#000000',
+    backgroundColor: theme.app.payment.yellow,
+    borderColor: theme.app.payment.yellow,
+    textColor: theme.app.payment.yellowText,
   },
   swyptReply: {
-    backgroundColor: '#00B894',
-    borderColor: '#00B894',
-    textColor: '#FFFFFF',
+    backgroundColor: theme.app.payment.green,
+    borderColor: theme.app.payment.green,
+    textColor: theme.app.payment.greenText,
   },
   airtelReply: {
-    backgroundColor: '#E30613',
-    borderColor: '#E30613',
-    textColor: '#FFFFFF',
+    backgroundColor: theme.app.payment.red,
+    borderColor: theme.app.payment.red,
+    textColor: theme.app.payment.redText,
   },
   replyText: {
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
-    color: '#333333',
+    color: theme.app.smartReplyText,
   },
   countyIndicator: {
     marginTop: 8,
@@ -137,10 +147,10 @@ const styles = StyleSheet.create({
   },
   countyChip: {
     backgroundColor: 'transparent',
-    borderColor: '#007AFF',
+    borderColor: theme.app.chatBubbleSent,
   },
   countyChipText: {
-    color: '#007AFF',
+    color: theme.app.chatBubbleSent,
     fontSize: 12,
   },
   loadingContainer: {
@@ -152,7 +162,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#666666',
+    color: theme.app.textSecondary,
     fontStyle: 'italic',
   },
 });

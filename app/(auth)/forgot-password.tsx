@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,10 +18,11 @@ import {
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { VALIDATION_RULES, ERROR_MESSAGES } from '../../src/utils/constants';
 
 export default function ForgotPasswordScreen() {
+  const { theme } = useTheme();
   const { resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -74,6 +75,8 @@ export default function ForgotPasswordScreen() {
   const handleBackToLogin = () => {
     router.back();
   };
+
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <KeyboardAvoidingView
@@ -134,10 +137,10 @@ export default function ForgotPasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   scrollContent: {
     flexGrow: 1,
@@ -160,12 +163,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
   },
   subtitle: {
     textAlign: 'center',
     marginBottom: 32,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   input: {
     marginBottom: 8,

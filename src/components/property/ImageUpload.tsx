@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,8 +17,14 @@ import {
   Chip,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
-import Video from 'react-native-video';
-import { defaultTheme } from '../../styles/theme';
+import { Video, ResizeMode } from 'expo-av';
+import { useTheme } from '../../theme/useTheme';
+import {
+  MAX_VIDEO_DURATION_SECONDS,
+  MAX_VIDEO_SIZE_MB,
+  validateVideoDuration,
+  validateVideoSize,
+} from '../../utils/videoValidator';
 
 interface MediaFile {
   id: string;
@@ -43,6 +49,8 @@ export default function ImageUpload({
   maxFiles = 10, 
   allowVideos = true 
 }: ImageUploadProps) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [uploading, setUploading] = useState(false);
   const [previewModal, setPreviewModal] = useState<{ visible: boolean; media?: MediaFile }>({
     visible: false
@@ -65,6 +73,7 @@ export default function ImageUpload({
 
     const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: type === 'video' ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.Images,
+      videoMaxDuration: type === 'video' ? MAX_VIDEO_DURATION_SECONDS : undefined,
       allowsMultipleSelection: true,
       quality: 0.8,
       aspect: [16, 9],
@@ -82,16 +91,7 @@ export default function ImageUpload({
           const filename = asset.fileName || `media_${Date.now()}_${index}`;
           const size = asset.fileSize || 0;
 
-          // Duration helper: rely on picker-provided duration; otherwise fallback to 0 (no blocking)
-          const getVideoDurationMs = (): number | undefined => {
-            if (typeof asset.duration === 'number') {
-              return Math.floor(asset.duration * 1000);
-            }
-            // If duration is missing, return undefined (we won't block on duration)
-            return undefined;
-          };
-
-          const durationMs = !isImage ? getVideoDurationMs() : undefined;
+          let durationMs: number | undefined;
 
           // Validation (non-blocking; we skip invalid but continue)
           if (isImage) {
@@ -112,19 +112,31 @@ export default function ImageUpload({
               skipped.push(`${filename}: invalid type (MP4/MOV only)`);
               continue;
             }
-            if (size > 25 * 1024 * 1024) {
-              skipped.push(`${filename}: ${Math.round(size/1024/1024)}MB > 25MB`);
+            const maxVideoBytes = MAX_VIDEO_SIZE_MB * 1024 * 1024;
+            if (size > maxVideoBytes) {
+              skipped.push(`${filename}: ${Math.round(size/1024/1024)}MB > ${MAX_VIDEO_SIZE_MB}MB`);
               continue;
             }
-            // Accept videos up to and including 30s; allow tiny tolerance for metadata drift
-            const maxMs = 30_000;
-            if (durationMs !== undefined) {
-              const effectiveMs = durationMs;
-              if (effectiveMs > maxMs + 50) {
-                const seconds = (effectiveMs / 1000).toFixed(1);
-                skipped.push(`${filename}: ${seconds}s > 30.0s max`);
-                continue;
-              }
+
+            const sizeOk = await validateVideoSize(asset.uri, MAX_VIDEO_SIZE_MB, size);
+            if (!sizeOk) {
+              skipped.push(`${filename}: exceeds ${MAX_VIDEO_SIZE_MB}MB max`);
+              continue;
+            }
+
+            const durationSeconds = typeof asset.duration === 'number' ? asset.duration : null;
+            const durationOk = await validateVideoDuration(
+              asset.uri,
+              MAX_VIDEO_DURATION_SECONDS,
+              durationSeconds !== null ? durationSeconds : undefined
+            );
+            if (!durationOk) {
+              skipped.push(`${filename}: exceeds ${MAX_VIDEO_DURATION_SECONDS}s max`);
+              continue;
+            }
+
+            if (durationSeconds !== null) {
+              durationMs = Math.floor(durationSeconds * 1000);
             }
           }
 
@@ -149,8 +161,8 @@ export default function ImageUpload({
 
         if (skipped.length > 0) {
           Alert.alert(
-            'Some files were skipped',
-            `${skipped.length} file(s) were not added:\n\n${skipped.join('\n')}`
+            'Files Not Added',
+            `${skipped.length} file(s) were not added:\n\n${skipped.join('\n')}\n\nVideos must be 30 seconds or less and under 20MB.`
           );
         }
       }
@@ -236,6 +248,12 @@ export default function ImageUpload({
           <Text style={styles.subtitle}>
             Upload high-quality photos and videos to showcase your property
           </Text>
+          <Text style={styles.hintText}>
+            Videos can be up to 30 seconds each (max 20MB).
+          </Text>
+          <Text style={styles.subHintText}>
+            Tip: Short videos (10-30s) show best on mobile.
+          </Text>
 
           {/* Upload Buttons */}
           <View style={styles.uploadButtons}>
@@ -288,7 +306,7 @@ export default function ImageUpload({
                       />
                       {item.type === 'video' && (
                         <View style={styles.videoOverlay}>
-                          <IconButton icon="play" size={24} iconColor="white" />
+                          <IconButton icon="play" size={24} iconColor={theme.app.iconOnDark} />
                         </View>
                       )}
                       {item.isPrimary && (
@@ -336,7 +354,7 @@ export default function ImageUpload({
                         size={20}
                         onPress={() => removeMedia(item.id)}
                         style={styles.actionButton}
-                        iconColor={defaultTheme.colors.error}
+                        iconColor={theme.colors.error}
                       />
                     </View>
                   </Card>
@@ -371,11 +389,9 @@ export default function ImageUpload({
                 <Video
                   source={{ uri: previewModal.media.uri }}
                   style={styles.modalImage}
-                  resizeMode="contain"
-                  controls={true}
-                  paused={false}
-                  muted={false}
-                  repeat={false}
+                  resizeMode={ResizeMode.CONTAIN}
+                  useNativeControls
+                  shouldPlay
                   onError={(error) => console.log('Video error:', error)}
                 />
               ) : (
@@ -401,7 +417,7 @@ export default function ImageUpload({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     marginBottom: 16,
   },
@@ -414,7 +430,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   subtitle: {
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 16,
+  },
+  hintText: {
+    color: theme.colors.onSurfaceVariant,
+    fontSize: 12,
+    marginBottom: 16,
+  },
+  subHintText: {
+    color: theme.colors.onSurfaceVariant,
+    fontSize: 11,
     marginBottom: 16,
   },
   uploadButtons: {
@@ -429,7 +455,7 @@ const styles = StyleSheet.create({
   },
   mediaCount: {
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 16,
   },
   mediaScroll: {
@@ -456,7 +482,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: theme.app.overlayMedium,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
@@ -465,10 +491,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     left: 4,
-    backgroundColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   primaryChipText: {
-    color: 'white',
+    color: theme.colors.onPrimary,
     fontSize: 10,
   },
   mediaActions: {
@@ -479,10 +505,10 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     margin: 0,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: theme.app.overlayLightStrong,
   },
   tipsCard: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
   },
   tipsTitle: {
     fontWeight: 'bold',
@@ -491,10 +517,10 @@ const styles = StyleSheet.create({
   tipText: {
     fontSize: 12,
     marginBottom: 4,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   modalContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.app.background,
     margin: 20,
     borderRadius: 8,
     overflow: 'hidden',

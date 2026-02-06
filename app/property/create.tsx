@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -20,19 +20,35 @@ import {
 import { router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
 import { useAuth } from '../../src/hooks/useAuth';
-import { defaultTheme } from '../../src/styles/theme';
+import { useTheme } from '../../src/theme/useTheme';
 import { PROPERTY_TYPES, AMENITIES, VALIDATION_RULES } from '../../src/utils/constants';
-import { Property, PropertyType, PropertyMedia } from '../../src/types/database';
+import { Property, PropertyType, PropertyMedia, WeekdayKey, ViewingTimeSlotRange } from '../../src/types/database';
 import ImageUpload from '../../src/components/property/ImageUpload';
 import { MediaFile, cloudinaryService } from '../../src/services/firebase/storage';
+import {
+  DEFAULT_VIEWING_DAYS,
+  DEFAULT_VIEWING_TIME_RANGES,
+  WEEKDAY_OPTIONS,
+  WEEKDAY_KEY_BY_INDEX,
+  normalizeViewingTimeSlots,
+} from '../../src/utils/viewingDefaults';
+import BlockedDatePicker from '../../src/components/viewings/BlockedDatePicker';
+import TimeSlotBuilder from '../../src/components/viewings/TimeSlotBuilder';
+
+const mapDaysToKeys = (days: number[]): WeekdayKey[] =>
+  days
+    .map((day) => WEEKDAY_KEY_BY_INDEX[day])
+    .filter((key): key is WeekdayKey => !!key);
 
 export default function CreatePropertyScreen() {
+  const { theme } = useTheme();
   const { user } = useAuth();
   const { createProperty, updateProperty } = useProperties();
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [fileProgress, setFileProgress] = useState<Record<string, number>>({});
   const [media, setMedia] = useState<MediaFile[]>([]);
+  const [blockedPickerVisible, setBlockedPickerVisible] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -57,6 +73,12 @@ export default function CreatePropertyScreen() {
     ward: '',
     estate: '',
     building: '',
+    viewingDays: DEFAULT_VIEWING_DAYS as number[],
+    viewingTimeSlots: normalizeViewingTimeSlots(
+      DEFAULT_VIEWING_TIME_RANGES,
+      mapDaysToKeys(DEFAULT_VIEWING_DAYS)
+    ) as ViewingTimeSlotRange[],
+    blockedDates: [] as string[],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -115,6 +137,56 @@ export default function CreatePropertyScreen() {
       amenities: prev.amenities.includes(amenity)
         ? prev.amenities.filter(a => a !== amenity)
         : [...prev.amenities, amenity]
+    }));
+  };
+
+  const normalizeSlotsForDays = (
+    slots: ViewingTimeSlotRange[],
+    nextDays: number[]
+  ): ViewingTimeSlotRange[] => {
+    const allowedKeys = mapDaysToKeys(nextDays);
+    if (allowedKeys.length === 0) return slots;
+    return slots
+      .map((slot) => {
+        const slotDays = slot.days && slot.days.length > 0 ? slot.days : allowedKeys;
+        const filtered = slotDays.filter((key) => allowedKeys.includes(key));
+        if (filtered.length === 0) return null;
+        return { ...slot, days: filtered };
+      })
+      .filter((slot): slot is ViewingTimeSlotRange => slot !== null);
+  };
+
+  const handleViewingDayToggle = (day: number) => {
+    setFormData(prev => {
+      const nextDays = prev.viewingDays.includes(day)
+        ? prev.viewingDays.filter(d => d !== day)
+        : [...prev.viewingDays, day];
+      return {
+        ...prev,
+        viewingDays: nextDays,
+        viewingTimeSlots: normalizeSlotsForDays(prev.viewingTimeSlots, nextDays),
+      };
+    });
+  };
+
+  const handleTimeSlotsChange = (slots: ViewingTimeSlotRange[]) => {
+    setFormData(prev => ({
+      ...prev,
+      viewingTimeSlots: slots,
+    }));
+  };
+
+  const handleApplyBlockedDates = (dates: string[]) => {
+    setFormData(prev => ({
+      ...prev,
+      blockedDates: dates.slice().sort()
+    }));
+  };
+
+  const handleRemoveBlockedDate = (dateKey: string) => {
+    setFormData(prev => ({
+      ...prev,
+      blockedDates: prev.blockedDates.filter(d => d !== dateKey)
     }));
   };
 
@@ -225,6 +297,9 @@ export default function CreatePropertyScreen() {
         ...(formData.deposit?.trim() ? { deposit: parseFloat(formData.deposit.trim()) } : {}),
         ...(formData.squareFeet?.trim() ? { squareFeet: parseInt(formData.squareFeet.trim()) } : {}),
         ...(formData.amenities.length > 0 ? { amenities: formData.amenities } : {}),
+        viewingDays: formData.viewingDays,
+        viewingTimeSlots: formData.viewingTimeSlots,
+        blockedDates: formData.blockedDates,
       };
 
       const result = await createProperty(propertyData);
@@ -287,9 +362,11 @@ export default function CreatePropertyScreen() {
     }
   };
 
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 32 }}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 0 }}>
         <Card style={styles.card}>
           <Card.Content>
             <Title style={styles.sectionTitle}>Basic Information</Title>
@@ -324,25 +401,25 @@ export default function CreatePropertyScreen() {
               allowVideos={true}
             />
 
-            <Card style={styles.card}>
-              <Card.Content>
-                <Title style={styles.sectionTitle}>Property Type</Title>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {['Apartment', 'House', 'Studio', 'Townhouse', 'Condo'].map((type) => (
-                      <Chip
-                        key={type}
-                        selected={formData.propertyType === type.toLowerCase()}
-                        onPress={() => handleFieldChange('propertyType', type.toLowerCase())}
-                        style={styles.featureChip}
-                      >
-                        {type}
-                      </Chip>
-                    ))}
-                  </View>
-                </ScrollView>
-              </Card.Content>
-            </Card>
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title style={styles.sectionTitle}>Property Type</Title>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}> {/* Reduced margin */}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {['Apartment', 'House', 'Studio', 'Townhouse', 'Condo'].map((type) => (
+                  <Chip
+                    key={type}
+                    selected={formData.propertyType === type.toLowerCase()}
+                    onPress={() => handleFieldChange('propertyType', type.toLowerCase())}
+                    style={styles.featureChip}
+                  >
+                    {type}
+                  </Chip>
+                ))}
+              </View>
+            </ScrollView>
+          </Card.Content>
+        </Card>
           </Card.Content>
         </Card>
 
@@ -512,6 +589,56 @@ export default function CreatePropertyScreen() {
 
         <Card style={styles.card}>
           <Card.Content>
+            <Title style={styles.sectionTitle}>Viewing Availability</Title>
+            <Text style={styles.subSectionTitle}>Available Days</Text>
+            <View style={styles.featuresContainer}>
+              {WEEKDAY_OPTIONS.map((day) => (
+                <Chip
+                  key={day.value}
+                  selected={formData.viewingDays.includes(day.value)}
+                  onPress={() => handleViewingDayToggle(day.value)}
+                  style={styles.featureChip}
+                >
+                  {day.label}
+                </Chip>
+              ))}
+            </View>
+            <Text style={styles.subSectionTitle}>Time Slots</Text>
+            <TimeSlotBuilder
+              slots={formData.viewingTimeSlots}
+              onChange={handleTimeSlotsChange}
+              availableDays={formData.viewingDays}
+            />
+            <Text style={styles.subSectionTitle}>Blocked Dates</Text>
+            <Button
+              mode="outlined"
+              onPress={() => setBlockedPickerVisible(true)}
+              style={styles.blockedButton}
+            >
+              Choose Blocked Dates
+            </Button>
+            <View style={styles.featuresContainer}>
+              {formData.blockedDates.map((date) => (
+                <Chip
+                  key={date}
+                  onPress={() => handleRemoveBlockedDate(date)}
+                  style={styles.featureChip}
+                >
+                  {date}
+                </Chip>
+              ))}
+            </View>
+            <BlockedDatePicker
+              visible={blockedPickerVisible}
+              blockedDates={formData.blockedDates}
+              onDismiss={() => setBlockedPickerVisible(false)}
+              onConfirm={handleApplyBlockedDates}
+            />
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.card}>
+          <Card.Content>
             <Title style={styles.sectionTitle}>Amenities</Title>
             <View style={styles.amenitiesContainer}>
               {AMENITIES.map((amenity) => (
@@ -547,7 +674,7 @@ export default function CreatePropertyScreen() {
         <Button
           mode="contained"
           onPress={handleSubmit}
-          style={[styles.submitButton, { marginBottom: 24 }]}
+          style={[styles.submitButton, { marginBottom: 16 }]}
           loading={loading}
           disabled={loading}
         >
@@ -558,17 +685,17 @@ export default function CreatePropertyScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: defaultTheme.colors.background,
+    backgroundColor: theme.app.background,
   },
   scrollView: {
     flex: 1,
   },
   card: {
     margin: 16,
-    marginTop: 8,
+    marginTop: 16,
     elevation: 2,
     borderRadius: 8,
   },
@@ -576,6 +703,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
+  },
+  subSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: theme.colors.onSurfaceVariant,
+  },
+  blockedButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 12,
   },
   input: {
     marginBottom: 8,
@@ -592,7 +729,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   segmentedButtons: {
     marginBottom: 16,
@@ -622,6 +759,6 @@ const styles = StyleSheet.create({
   progressText: {
     textAlign: 'center',
     marginTop: 8,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
 });

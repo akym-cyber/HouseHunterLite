@@ -47,6 +47,7 @@ export default function ImageUpload({
   const [previewModal, setPreviewModal] = useState<{ visible: boolean; media?: MediaFile }>({
     visible: false
   });
+  const MAX_VIDEO_DURATION_MS = 30_000; // 30 seconds
 
   const requestPermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -65,6 +66,7 @@ export default function ImageUpload({
 
     const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: type === 'video' ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.Images,
+      videoMaxDuration: type === 'video' ? Math.round(MAX_VIDEO_DURATION_MS / 1000) : undefined,
       allowsMultipleSelection: true,
       quality: 0.8,
       aspect: [16, 9],
@@ -112,12 +114,12 @@ export default function ImageUpload({
               skipped.push(`${filename}: invalid type (MP4/MOV only)`);
               continue;
             }
-            if (size > 25 * 1024 * 1024) {
-              skipped.push(`${filename}: ${Math.round(size/1024/1024)}MB > 25MB`);
+            if (size > 20 * 1024 * 1024) {
+              skipped.push(`${filename}: ${Math.round(size/1024/1024)}MB > 20MB`);
               continue;
             }
-            // Accept videos up to and including 30s; allow tiny tolerance for metadata drift
-            const maxMs = 30_000;
+            // Accept videos up to and including 30 seconds; allow tiny tolerance for metadata drift
+            const maxMs = MAX_VIDEO_DURATION_MS;
             if (durationMs !== undefined) {
               const effectiveMs = durationMs;
               if (effectiveMs > maxMs + 50) {
@@ -149,8 +151,8 @@ export default function ImageUpload({
 
         if (skipped.length > 0) {
           Alert.alert(
-            'Some files were skipped',
-            `${skipped.length} file(s) were not added:\n\n${skipped.join('\n')}`
+            'Files Not Added',
+            `${skipped.length} file(s) were not added:\n\n${skipped.join('\n')}\n\nVideos must be 30 seconds or less.`
           );
         }
       }

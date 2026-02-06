@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -20,7 +20,7 @@ import {
 } from 'react-native-paper';
 import { Property, Message } from '../../types/database';
 import { useAuth } from '../../hooks/useAuth';
-import { defaultTheme } from '../../styles/theme';
+import { useTheme } from '../../theme/useTheme';
 import {
   initiateStkPush,
   formatKes,
@@ -56,6 +56,8 @@ export default function PaymentIntegration({
   visible,
   onDismiss,
 }: PaymentIntegrationProps) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const { user } = useAuth();
   const [paymentType, setPaymentType] = useState<'rent' | 'deposit' | 'custom'>('rent');
   const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'swypt'>('mpesa');
@@ -353,7 +355,7 @@ Move-in Date: ${property.availableDate || 'Available now'}`;
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   modal: {
     margin: 20,
     maxHeight: '80%',
@@ -377,7 +379,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
-    color: defaultTheme.colors.onSurface,
+    color: theme.colors.onSurface,
   },
   paymentMethodContainer: {
     flexDirection: 'row',
@@ -390,12 +392,12 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: defaultTheme.colors.outline,
+    borderColor: theme.colors.outline,
     marginHorizontal: 4,
   },
   paymentMethodButtonActive: {
-    backgroundColor: defaultTheme.colors.primaryContainer,
-    borderColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primaryContainer,
+    borderColor: theme.colors.primary,
   },
   methodDetails: {
     alignItems: 'center',
@@ -405,19 +407,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   paymentMethodTextActive: {
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
   },
   methodFees: {
     fontSize: 10,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginTop: 2,
   },
   methodTime: {
     fontSize: 10,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginTop: 2,
   },
   paymentTypeContainer: {
@@ -431,20 +433,20 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: defaultTheme.colors.outline,
+    borderColor: theme.colors.outline,
     marginHorizontal: 4,
   },
   paymentTypeButtonActive: {
-    backgroundColor: defaultTheme.colors.primaryContainer,
-    borderColor: defaultTheme.colors.primary,
+    backgroundColor: theme.colors.primaryContainer,
+    borderColor: theme.colors.primary,
   },
   paymentTypeText: {
     fontSize: 12,
     textAlign: 'center',
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   paymentTypeTextActive: {
-    color: defaultTheme.colors.primary,
+    color: theme.colors.primary,
     fontWeight: '600',
   },
   input: {
@@ -454,7 +456,7 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   infoContainer: {
-    backgroundColor: defaultTheme.colors.surfaceVariant,
+    backgroundColor: theme.colors.surfaceVariant,
     padding: 16,
     borderRadius: 8,
     marginTop: 16,
@@ -463,11 +465,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
   },
   infoText: {
     fontSize: 12,
-    color: defaultTheme.colors.onSurfaceVariant,
+    color: theme.colors.onSurfaceVariant,
     marginBottom: 4,
     lineHeight: 18,
   },

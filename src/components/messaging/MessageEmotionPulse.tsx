@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Animated, StyleSheet, Platform } from 'react-native';
+import { useTheme } from '../../theme/useTheme';
 
 interface MessageEmotionPulseProps {
   reactions: { [emoji: string]: string[] };
@@ -10,6 +11,7 @@ const MessageEmotionPulse: React.FC<MessageEmotionPulseProps> = ({
   reactions,
   children,
 }) => {
+  const { theme } = useTheme();
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
 
@@ -22,17 +24,17 @@ const MessageEmotionPulse: React.FC<MessageEmotionPulseProps> = ({
 
     // Map emojis to colors and intensities
     const emotionMap: { [key: string]: { color: string; intensity: number } } = {
-      '❤️': { color: '#FF1744', intensity: 0.4 }, // Red for love
-      '👍': { color: '#2196F3', intensity: 0.3 }, // Blue for approval
-      '😂': { color: '#FF9800', intensity: 0.35 }, // Orange for laughter
-      '😮': { color: '#9C27B0', intensity: 0.3 }, // Purple for surprise
-      '😢': { color: '#00BCD4', intensity: 0.25 }, // Cyan for sadness
-      '😡': { color: '#F44336', intensity: 0.45 }, // Red for anger
-      '🙌': { color: '#FFC107', intensity: 0.35 }, // Yellow for celebration
-      '👏': { color: '#4CAF50', intensity: 0.3 }, // Green for applause
+      '❤️': { color: theme.app.reactions.love, intensity: 0.4 },
+      '👍': { color: theme.app.reactions.approve, intensity: 0.3 },
+      '😂': { color: theme.app.reactions.laugh, intensity: 0.35 },
+      '😮': { color: theme.app.reactions.surprise, intensity: 0.3 },
+      '😢': { color: theme.app.reactions.sadness, intensity: 0.25 },
+      '😡': { color: theme.app.reactions.anger, intensity: 0.45 },
+      '🙌': { color: theme.app.reactions.celebration, intensity: 0.35 },
+      '👏': { color: theme.app.reactions.applause, intensity: 0.3 },
     };
 
-    const emotion = emotionMap[dominantEmoji] || { color: '#E1F5FE', intensity: 0.1 };
+    const emotion = emotionMap[dominantEmoji] || { color: theme.app.reactions.neutral, intensity: 0.1 };
     const intensity = Math.min(totalReactions * 0.1, emotion.intensity); // Cap intensity
 
     return {
@@ -40,7 +42,7 @@ const MessageEmotionPulse: React.FC<MessageEmotionPulseProps> = ({
       intensity: totalReactions > 0 ? intensity : 0,
       totalReactions,
     };
-  }, [reactions]);
+  }, [reactions, theme]);
 
   useEffect(() => {
     if (emotionData.totalReactions > 0) {

@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useTheme } from '../../theme/useTheme';
 
 interface DateSeparatorProps {
   dateText: string;
 }
 
 const DateSeparator: React.FC<DateSeparatorProps> = ({ dateText }) => {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View style={styles.container}>
       <Text style={styles.text}>{dateText}</Text>
@@ -13,15 +16,15 @@ const DateSeparator: React.FC<DateSeparatorProps> = ({ dateText }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   container: {
     alignItems: 'center',
     marginVertical: 16,
     paddingHorizontal: 16,
   },
   text: {
-    backgroundColor: '#F0F0F0',
-    color: '#666666',
+    backgroundColor: theme.app.dateSeparatorBackground,
+    color: theme.app.dateSeparatorText,
     fontSize: 12,
     fontWeight: '500',
     paddingHorizontal: 12,

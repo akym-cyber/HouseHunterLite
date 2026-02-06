@@ -1,4 +1,5 @@
 import { Alert } from 'react-native';
+import { lightAppColors } from '../../theme/colors';
 
 // Swypt API Configuration
 const SWYPT_CONFIG = {
@@ -238,7 +239,7 @@ export const generateInvoice = async (
         }],
         branding: {
           logo: 'https://househunter.com/logo.png',
-          primaryColor: '#007AFF',
+          primaryColor: lightAppColors.chatBubbleSent,
         },
       }),
     });

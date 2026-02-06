@@ -132,6 +132,7 @@ export interface CloudinaryUploadResult {
 export class CloudinaryService {
   private cloudName: string | undefined;
   private unsignedPreset: string | undefined;
+  private readonly maxVideoDurationMs = 30_000; // 30 seconds
 
   constructor() {
     // Read from expo-constants properly
@@ -184,9 +185,13 @@ export class CloudinaryService {
             return { success: false, error: `${file.name} exceeds 5MB limit` };
           }
         } else {
-          const maxBytes = 25 * 1024 * 1024;
+          const maxBytes = 20 * 1024 * 1024;
           if (file.size > maxBytes) {
-            return { success: false, error: `${file.name} exceeds 25MB limit` };
+            return { success: false, error: `${file.name} exceeds 20MB limit` };
+          }
+          if (file.durationMs !== undefined && file.durationMs > this.maxVideoDurationMs) {
+            const seconds = Math.round(file.durationMs / 1000);
+            return { success: false, error: `${file.name} is ${seconds}s. Max allowed is 30s.` };
           }
         }
 
@@ -201,6 +206,9 @@ export class CloudinaryService {
         const formData = new FormData();
         formData.append('file', `data:${file.type === 'video' ? 'video/mp4' : 'image/jpeg'};base64,${base64}` as any);
         formData.append('upload_preset', this.unsignedPreset!);
+        if (file.type === 'video') {
+          formData.append('max_duration', Math.round(this.maxVideoDurationMs / 1000).toString());
+        }
 
         // Note: fetch in React Native does not provide granular progress; we emit 100% after completion
         const response = await fetch(uploadUrl, {

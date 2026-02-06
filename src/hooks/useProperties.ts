@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { propertyHelpers } from '../services/firebase/firebaseHelpers';
 import { Property } from '../types/database';
 import { useAuth } from './useAuth';
@@ -30,13 +30,7 @@ export const useProperties = () => {
     error: null,
   });
 
-  useEffect(() => {
-    if (user) {
-      fetchProperties();
-    }
-  }, [user]);
-
-  const fetchProperties = async () => {
+  const fetchProperties = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
@@ -83,7 +77,13 @@ export const useProperties = () => {
       }));
       return { success: false, error: errorMessage };
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchProperties();
+    }
+  }, [user, fetchProperties]);
 
   const searchProperties = async (filters: SearchFilters) => {
     try {
@@ -289,9 +289,9 @@ export const useProperties = () => {
     }
   };
 
-  const refreshProperties = async () => {
+  const refreshProperties = useCallback(async () => {
     return await fetchProperties();
-  };
+  }, [fetchProperties]);
 
   return {
     properties: state.properties,
