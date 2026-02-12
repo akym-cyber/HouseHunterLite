@@ -68,7 +68,6 @@ function ChatRoom({
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Message>>(null);
   const chatInputRef = useRef<TextInput | null>(null);
-  const scrollPositionRef = useRef({ offset: 0, contentHeight: 0, layoutHeight: 0 });
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -80,6 +79,7 @@ function ChatRoom({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [inputBarHeight, setInputBarHeight] = useState(0);
+  const listMessages = useMemo(() => [...messages].reverse(), [messages]);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Video call pulse animation
@@ -113,40 +113,34 @@ function ChatRoom({
     };
   }, [videoCallPulseAnim]);
 
-  // Smart scroll to bottom
-  const scrollToBottom = useCallback((animated = true, force = false) => {
+  const performScrollToBottom = useCallback((animated = false) => {
     if (!flatListRef.current) return;
-    if (force || isNearBottom) {
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated });
-      });
-    }
-  }, [isNearBottom]);
-
-  const scrollToExactBottom = useCallback((animated = false) => {
-    if (!flatListRef.current) return;
-    const { contentHeight, layoutHeight } = scrollPositionRef.current;
-    if (contentHeight && layoutHeight) {
-      const offset = Math.max(0, contentHeight - layoutHeight);
-      flatListRef.current.scrollToOffset({ offset, animated });
-      return;
-    }
-    flatListRef.current.scrollToEnd({ animated });
+    // In inverted mode, offset 0 is the visual bottom (latest messages).
+    flatListRef.current.scrollToOffset({ offset: 0, animated });
   }, []);
 
-  const scrollToLastMessage = useCallback((animated = false) => {
+  // Smart scroll to bottom
+  const scrollToBottom = useCallback((animated = true, force = false) => {
+    if (force || isNearBottom) {
+      requestAnimationFrame(() => {
+        performScrollToBottom(animated);
+      });
+    }
+  }, [isNearBottom, performScrollToBottom]);
+
+  const scrollToBottomInstant = useCallback(() => {
     if (!flatListRef.current) return;
-    const lastIndex = messages.length - 1;
-    if (lastIndex < 0) return;
-    flatListRef.current.scrollToIndex({ index: lastIndex, viewPosition: 1, animated });
-  }, [messages.length]);
+    requestAnimationFrame(() => {
+      performScrollToBottom(false);
+    });
+  }, [performScrollToBottom]);
 
   const kickToExactBottom = useCallback((animated = false) => {
-    scrollToLastMessage(animated);
+    performScrollToBottom(animated);
     requestAnimationFrame(() => {
-      scrollToLastMessage(false);
+      performScrollToBottom(false);
     });
-  }, [scrollToLastMessage]);
+  }, [performScrollToBottom]);
 
   const scheduleAutoScroll = useCallback((delayMs: number) => {
     if (autoScrollTimeoutRef.current) {
@@ -169,16 +163,10 @@ function ChatRoom({
 
   // Track scroll position
   const handleScroll = useCallback((event: any) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    
-    scrollPositionRef.current = {
-      offset: contentOffset.y,
-      contentHeight: contentSize.height,
-      layoutHeight: layoutMeasurement.height,
-    };
+    const { contentOffset } = event.nativeEvent;
 
-    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    const nowNearBottom = distanceFromBottom < SCROLL_THRESHOLD;
+    // In inverted lists, offset 0 means we are pinned to latest messages.
+    const nowNearBottom = contentOffset.y < SCROLL_THRESHOLD;
     setIsNearBottom(nowNearBottom);
     if (nowNearBottom) {
       keepPinnedToBottomRef.current = true;
@@ -208,7 +196,7 @@ function ChatRoom({
     }, 500);
   }, []);
 
-  // Scroll to bottom on new messages
+  // Scroll to latest on new messages when user is already near bottom.
   useEffect(() => {
     if (messages.length > 0 && isNearBottom && !isUserScrollingRef.current) {
       scheduleAutoScroll(0);
@@ -324,51 +312,70 @@ function ChatRoom({
     return new Date();
   }, []);
 
-  const getDateSeparator = useCallback((messages: Message[], index: number): string | null => {
-    const currentMessage = messages[index];
-    const previousMessage = index > 0 ? messages[index - 1] : null;
+  const formatDateLabel = useCallback((messageDate: Date): string => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (messageDate.toDateString() === today.toDateString()) {
+      return 'Today';
+    }
+    if (messageDate.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    }
+    return messageDate.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }, []);
+
+  const getDateSeparator = useCallback((items: Message[], index: number): string | null => {
+    const currentMessage = items[index];
+    const olderMessage = index < items.length - 1 ? items[index + 1] : null;
 
     const currentDate = timestampToDate(currentMessage.created_at).toDateString();
-    const previousDate = previousMessage
-      ? timestampToDate(previousMessage.created_at).toDateString()
+    const olderDate = olderMessage
+      ? timestampToDate(olderMessage.created_at).toDateString()
       : null;
 
-    if (index === 0 || currentDate !== previousDate) {
-      const messageDate = timestampToDate(currentMessage.created_at);
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+    // The visual top date chip is rendered via ListFooterComponent in inverted mode.
+    if (index === items.length - 1) {
+      return null;
+    }
 
-      if (messageDate.toDateString() === today.toDateString()) {
-        return 'Today';
-      } else if (messageDate.toDateString() === yesterday.toDateString()) {
-        return 'Yesterday';
-      } else {
-        return messageDate.toLocaleDateString('en-US', {
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric',
-        });
-      }
+    if (currentDate !== olderDate) {
+      return formatDateLabel(timestampToDate(currentMessage.created_at));
     }
 
     return null;
-  }, [timestampToDate]);
+  }, [formatDateLabel, timestampToDate]);
+
+  const renderTopDateSeparator = useCallback(() => {
+    if (listMessages.length === 0) return null;
+    const oldestMessage = listMessages[listMessages.length - 1];
+    const dateText = formatDateLabel(timestampToDate(oldestMessage.created_at));
+    return (
+      <View style={styles.dateSeparatorWrap}>
+        <DateSeparator dateText={dateText} />
+      </View>
+    );
+  }, [formatDateLabel, listMessages, styles.dateSeparatorWrap, timestampToDate]);
 
   const isConsecutiveFromSameSender = useCallback((currentIndex: number): boolean => {
-    if (currentIndex === 0) return false;
+    if (currentIndex >= listMessages.length - 1) return false;
 
-    const currentMessage = messages[currentIndex];
-    const previousMessage = messages[currentIndex - 1];
+    const currentMessage = listMessages[currentIndex];
+    const olderMessage = listMessages[currentIndex + 1];
 
-    const sameSender = currentMessage.sender_id === previousMessage.sender_id;
+    const sameSender = currentMessage.sender_id === olderMessage.sender_id;
     const currentTime = timestampToDate(currentMessage.created_at);
-    const previousTime = timestampToDate(previousMessage.created_at);
-    const timeDiff = currentTime.getTime() - previousTime.getTime();
+    const olderTime = timestampToDate(olderMessage.created_at);
+    const timeDiff = currentTime.getTime() - olderTime.getTime();
     const withinTimeWindow = timeDiff < (5 * 60 * 1000);
 
     return sameSender && withinTimeWindow;
-  }, [messages, timestampToDate]);
+  }, [listMessages, timestampToDate]);
 
   const handleRetry = useCallback(async (messageId: string) => {
     const message = messages.find(m => m.id === messageId);
@@ -399,7 +406,7 @@ function ChatRoom({
 
   const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
     const isOwnMessage = item.sender_id === user?.uid;
-    const dateSeparator = getDateSeparator(messages, index);
+    const dateSeparator = getDateSeparator(listMessages, index);
     const isConsecutive = isConsecutiveFromSameSender(index);
     const shouldShowAvatar = !isOwnMessage && !isConsecutive;
 
@@ -465,7 +472,7 @@ function ChatRoom({
       </>
     );
   }, [
-    messages,
+    listMessages,
     user?.uid,
     otherUser,
     formatMessageTime,
@@ -482,13 +489,17 @@ function ChatRoom({
     if (!newMessage.trim() || sending) return;
 
     const messageContent = newMessage.trim();
+    
     setNewMessage('');
+    
     setSending(true);
 
     try {
       await onSendMessage(messageContent, replyingTo?.id);
       setReplyingTo(null);
-      setTimeout(() => scrollToBottom(true, true), 100);
+      
+      scrollToBottomInstant();
+      
     } catch (error: any) {
       console.error('Failed to send message:', error);
       
@@ -507,7 +518,7 @@ function ChatRoom({
     } finally {
       setSending(false);
     }
-  }, [newMessage, sending, replyingTo, onSendMessage, scrollToBottom]);
+  }, [newMessage, sending, replyingTo, onSendMessage, scrollToBottomInstant]);
 
   const handleSendMedia = useCallback(async (media: any[], messageType: Message['message_type']) => {
     if (sending || !media || media.length === 0) return;
@@ -550,10 +561,10 @@ function ChatRoom({
 
   const handleInputFocus = useCallback(() => {
     setIsInputFocused(true);
-    // Ensure the latest message is visible above the keyboard when focusing input.
+    // Jump straight to the latest message when focusing input.
     keepPinnedToBottomRef.current = true;
-    kickToExactBottom(false);
-  }, [kickToExactBottom]);
+    scrollToBottomInstant();
+  }, [scrollToBottomInstant]);
 
   const handleInputBlur = useCallback(() => {
     setIsInputFocused(false);
@@ -566,25 +577,7 @@ function ChatRoom({
     setInputBarHeight((prev) => (prev === height ? prev : height));
   }, []);
 
-  const handleListLayout = useCallback((event: any) => {
-    const layoutHeight = event?.nativeEvent?.layout?.height;
-    if (typeof layoutHeight === 'number') {
-      scrollPositionRef.current = {
-        ...scrollPositionRef.current,
-        layoutHeight,
-      };
-    }
-    if (!keepPinnedToBottomRef.current || isUserScrollingRef.current) return;
-    kickToExactBottom(false);
-  }, [kickToExactBottom]);
-
-  const handleContentSizeChange = useCallback((_width: number, height: number) => {
-    if (typeof height === 'number') {
-      scrollPositionRef.current = {
-        ...scrollPositionRef.current,
-        contentHeight: height,
-      };
-    }
+  const handleContentSizeChange = useCallback(() => {
     if (!keepPinnedToBottomRef.current || isUserScrollingRef.current) return;
     kickToExactBottom(false);
   }, [kickToExactBottom]);
@@ -690,23 +683,10 @@ function ChatRoom({
     );
   }, [onBack, otherUser, formatMessageTime, videoCallPulseAnim, insets.top]);
 
-  // Loading state
-  const maintainVisiblePosition = useMemo(() => {
-    if (Platform.OS === 'ios') {
-      return undefined;
-    }
-
-    return isNearBottom && messages.length > 0
-      ? { minIndexForVisible: messages.length - 1 }
-      : undefined;
-  }, [isNearBottom, messages.length]);
-
   useEffect(() => {
     if (!isInputFocused || inputBarHeight <= 0) return;
-    requestAnimationFrame(() => {
-      flatListRef.current?.scrollToEnd({ animated: false });
-    });
-  }, [inputBarHeight, isInputFocused]);
+    scrollToBottomInstant();
+  }, [inputBarHeight, isInputFocused, scrollToBottomInstant]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -715,22 +695,34 @@ function ChatRoom({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
+        {renderHeader()}
+
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={listMessages}
+          inverted
           renderItem={renderMessage}
           keyExtractor={keyExtractor}
-          style={{ flex: 1 }}
+          style={styles.messagesList}
           contentContainerStyle={[
             styles.messagesContent,
-            { paddingBottom: Math.max(6, inputBarHeight + 6) },
+            { paddingTop: 6 },
           ]}
-          ListHeaderComponent={renderHeader}
-          stickyHeaderIndices={[0]}
+          removeClippedSubviews={Platform.OS === 'android'}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={10}
+          windowSize={5}
+          onScroll={handleScroll}
+          onScrollBeginDrag={handleScrollBeginDrag}
+          onScrollEndDrag={handleScrollEndDrag}
+          onEndReached={onLoadMore}
+          onEndReachedThreshold={0.5}
+          onContentSizeChange={handleContentSizeChange}
+          ListFooterComponent={renderTopDateSeparator}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          maintainVisibleContentPosition={maintainVisiblePosition}
         />
 
         <View onLayout={handleInputBarLayout}>
@@ -805,7 +797,9 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginBottom: 16,
   },
   messagesContent: {
-    paddingBottom: 6,
+    // In inverted mode, paddingBottom becomes visual top spacing.
+    // Keep extra space so the first date chip at the top is not clipped.
+    paddingBottom: 16,
   },
   messagesContentKeyboard: {
     paddingBottom: 40,
@@ -859,4 +853,5 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
 });
 
 export default ChatRoom;
+
 

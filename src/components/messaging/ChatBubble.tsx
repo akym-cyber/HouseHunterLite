@@ -13,16 +13,19 @@ interface ChatBubbleProps {
   getMessageStatusIcon: (status?: string) => string | null;
   isSending?: boolean;
   onRetry?: (messageId: string) => void;
+  otherUserAvatar?: string;
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({
+const ChatBubble = React.memo(({
   message,
   isOwnMessage,
+  isSending = false,
   formatMessageTime,
   getMessageStatusIcon,
-  isSending = false,
   onRetry,
-}) => {
+  otherUserAvatar,
+}: ChatBubbleProps) => {
+  void otherUserAvatar;
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const opacityAnim = useRef(new Animated.Value(1)).current;
@@ -216,7 +219,13 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
       </View>
     </View>
   );
-};
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.isOwnMessage === nextProps.isOwnMessage &&
+    prevProps.isSending === nextProps.isSending
+  );
+});
 
 const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   // Message row
@@ -242,7 +251,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   ownBubbleContainer: {
     alignItems: 'flex-end',
-    marginRight: 4,
+    marginRight: -2,
     maxWidth: '75%',
   },
   otherBubbleContainer: {
@@ -373,4 +382,3 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
 });
 
 export default ChatBubble;
-
