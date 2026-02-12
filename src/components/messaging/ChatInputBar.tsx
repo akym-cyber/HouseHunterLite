@@ -588,11 +588,14 @@ function ChatInputBar({
             onPress={handleSendPress}
             disabled={isLoading}
           >
-            <Ionicons
-              name={hasText ? "send" : "mic"}
-              size={18}
-              color={hasText ? theme.colors.onPrimary : theme.colors.onSurface}
-            />
+            <View style={hasText ? styles.sendIconOffset : null}>
+              <Ionicons
+                name={hasText ? "paper-plane" : "mic"}
+                size={18}
+                color={hasText ? theme.colors.onPrimary : theme.colors.onSurface}
+                style={hasText ? { transform: [{ rotate: '45deg' }] } : null}
+              />
+            </View>
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -637,8 +640,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.outline,
     paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: Platform.select({ ios: 6, android: 8 }),
+    paddingTop: 5,
+    paddingBottom: Platform.select({ ios: 5, android: 7 }),
   },
   inputContainerRaised: {
     marginBottom: Platform.select({ ios: 44, android: 0 }),
@@ -673,8 +676,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     borderColor: theme.colors.outline,
     paddingLeft: 8,
     paddingRight: 6,
-    paddingVertical: 4,
-    minHeight: 44,
+    paddingVertical: 3,
+    minHeight: 41,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -703,13 +706,13 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
       android: 20
     }),
     paddingVertical: Platform.select({
-      ios: 8,
-      android: 8
+      ios: 7,
+      android: 7
     }),
     paddingHorizontal: 8,
     minHeight: Platform.select({
-      ios: 38,
-      android: 36
+      ios: 35,
+      android: 33
     }),
     maxHeight: Platform.select({
       ios: 150,
@@ -724,12 +727,15 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 4,
+    alignSelf: 'flex-end',
     marginBottom: 2,
   },
   rightIconsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: 4,
+    alignSelf: 'flex-end',
+    marginBottom: 2,
   },
   rightActionIcon: {
     width: 32,
@@ -743,6 +749,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 2,
+    alignSelf: 'flex-end',
+    marginBottom: 2,
   },
   sendButton: {
     width: 32,
@@ -755,6 +763,9 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+  },
+  sendIconOffset: {
+    transform: [{ translateX: -2 }],
   },
   emojiModalOverlay: {
     flex: 1,

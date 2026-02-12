@@ -79,6 +79,7 @@ function ChatRoom({
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [inputBarHeight, setInputBarHeight] = useState(0);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Video call pulse animation
@@ -559,6 +560,12 @@ function ChatRoom({
     keepPinnedToBottomRef.current = false;
   }, []);
 
+  const handleInputBarLayout = useCallback((event: any) => {
+    const height = event?.nativeEvent?.layout?.height;
+    if (typeof height !== 'number' || height <= 0) return;
+    setInputBarHeight((prev) => (prev === height ? prev : height));
+  }, []);
+
   const handleListLayout = useCallback((event: any) => {
     const layoutHeight = event?.nativeEvent?.layout?.height;
     if (typeof layoutHeight === 'number') {
@@ -694,47 +701,54 @@ function ChatRoom({
       : undefined;
   }, [isNearBottom, messages.length]);
 
+  useEffect(() => {
+    if (!isInputFocused || inputBarHeight <= 0) return;
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    });
+  }, [inputBarHeight, isInputFocused]);
+
   return (
     <View style={{ flex: 1 }}>
-      ✅ Replace your return block with this:
-import { KeyboardAvoidingView } from 'react-native';
-
-return (
-  <View style={{ flex: 1 }}>
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
-    >
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={keyExtractor}
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.messagesContent}
-        ListHeaderComponent={renderHeader}
-        stickyHeaderIndices={[0]}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      />
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={keyExtractor}
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            styles.messagesContent,
+            { paddingBottom: Math.max(6, inputBarHeight + 6) },
+          ]}
+          ListHeaderComponent={renderHeader}
+          stickyHeaderIndices={[0]}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          maintainVisibleContentPosition={maintainVisiblePosition}
+        />
 
-      <ChatInputBar
-        value={newMessage}
-        onChangeText={setNewMessage}
-        onSend={handleSend}
-        onSendMedia={handleSendMedia}
-        onSendVoice={handleSendVoice}
-        conversationId={conversation.id}
-        isFocused={isInputFocused}
-        onFocus={handleInputFocus}
-        onBlur={handleInputBlur}
-        inputRef={chatInputRef}
-      />
-    </KeyboardAvoidingView>
-  </View>
- </View>
+        <View onLayout={handleInputBarLayout}>
+          <ChatInputBar
+            value={newMessage}
+            onChangeText={setNewMessage}
+            onSend={handleSend}
+            onSendMedia={handleSendMedia}
+            onSendVoice={handleSendVoice}
+            conversationId={conversation.id}
+            isFocused={isInputFocused}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            inputRef={chatInputRef}
+          />
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -845,3 +859,4 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
 });
 
 export default ChatRoom;
+
