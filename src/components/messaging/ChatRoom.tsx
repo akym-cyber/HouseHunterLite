@@ -722,7 +722,8 @@ function ChatRoom({
           ListFooterComponent={renderTopDateSeparator}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={true}
+          scrollIndicatorInsets={{ right: 1 }}
         />
 
         <View onLayout={handleInputBarLayout}>
