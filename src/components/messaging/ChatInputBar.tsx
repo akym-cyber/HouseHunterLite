@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
+﻿import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -11,10 +11,7 @@ import {
   FlatList,
   Animated,
   PanResponder,
-  Vibration,
   Dimensions,
-  LayoutAnimation,
-  UIManager,
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,11 +24,6 @@ import { useTheme } from '../../theme/useTheme';
 import { Message, MessageMedia } from '../../types/database';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// Enable LayoutAnimation for Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 // Emoji data - simplified set for demo
 const EMOJIS = [
@@ -84,14 +76,13 @@ function ChatInputBar({
 }: ChatInputBarProps) {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+
   // State management
   const [isLoading, setIsLoading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
-  const [inputHeight, setInputHeight] = useState(24);
-  const [iconsVisible, setIconsVisible] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   // Refs
@@ -103,7 +94,8 @@ function ChatInputBar({
   // Animation values
   const recordButtonScale = useRef(new Animated.Value(1)).current;
   const recordPulseAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  const hasText = value.trim().length > 0;
 
   // Initialize audio
   useEffect(() => {
@@ -153,31 +145,7 @@ function ChatInputBar({
     };
   }, []);
 
-  const hasText = value.trim().length > 0;
-
-  // Handle icons visibility animation - hide when typing starts (has text)
-  useEffect(() => {
-    if (hasText) {
-      // Hide icons with fade animation when typing starts
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        setIconsVisible(false);
-      });
-    } else {
-      // Show icons with fade animation when no text (not typing)
-      setIconsVisible(true);
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [hasText, fadeAnim]);
-
-  // Handle camera functionality
+  // Camera handler
   const handleCameraPress = useCallback(async () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -202,14 +170,12 @@ function ChatInputBar({
       if (!result.canceled && result.assets?.[0]) {
         const asset = result.assets[0];
 
-        // Check file size (10MB limit)
-        const maxSize = 10 * 1024 * 1024; // 10MB
+        const maxSize = 10 * 1024 * 1024;
         if (asset.fileSize && asset.fileSize > maxSize) {
           Alert.alert('Photo Too Large', 'Please take a photo smaller than 10MB.');
           return;
         }
 
-        // Show preview and confirm send
         Alert.alert(
           'Send Photo',
           'Do you want to send this photo?',
@@ -241,7 +207,7 @@ function ChatInputBar({
     }
   }, [onSendMedia]);
 
-  // Handle document picker
+  // Attachment handler
   const handleAttachmentPress = useCallback(async () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -256,14 +222,12 @@ function ChatInputBar({
         const asset = result.assets[0];
         const { name, size, uri, mimeType } = asset;
 
-        // Check file size (10MB limit)
-        const maxSize = 10 * 1024 * 1024; // 10MB
+        const maxSize = 10 * 1024 * 1024;
         if (size && size > maxSize) {
           Alert.alert('File Too Large', 'Please select a file smaller than 10MB.');
           return;
         }
 
-        // Show file info and confirm
         Alert.alert(
           'Send File',
           `Send "${name}" (${(size / 1024 / 1024).toFixed(2)} MB)?`,
@@ -292,7 +256,7 @@ function ChatInputBar({
     }
   }, [onSendMedia]);
 
-  // Handle emoji picker
+  // Emoji handler
   const handleEmojiPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowEmojiPicker(true);
@@ -304,12 +268,10 @@ function ChatInputBar({
     setShowEmojiPicker(false);
   }, [value, onChangeText]);
 
-  // Handle phone call
+  // Phone call handler
   const handlePhoneCall = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    // For demo, we'll use a placeholder number
-    const phoneNumber = '+254794252032'; 
+    const phoneNumber = '+254794252032';
 
     Alert.alert(
       'Make Phone Call',
@@ -335,13 +297,9 @@ function ChatInputBar({
     );
   }, []);
 
-  // Voice recording functionality
+  // Voice recording
   const startRecording = useCallback(async () => {
-    // Prevent multiple recordings
-    if (isRecording || recordingRef.current) {
-      console.warn('Recording already in progress');
-      return;
-    }
+    if (isRecording || recordingRef.current) return;
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -359,7 +317,6 @@ function ChatInputBar({
       setIsRecording(true);
       setRecordingDuration(0);
 
-      // Start recording animation
       Animated.loop(
         Animated.sequence([
           Animated.timing(recordPulseAnim, {
@@ -401,7 +358,6 @@ function ChatInputBar({
 
       await recording.startAsync();
 
-      // Start timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
@@ -411,7 +367,7 @@ function ChatInputBar({
       setIsRecording(false);
       Alert.alert('Error', 'Failed to start recording.');
     }
-  }, [recordPulseAnim]);
+  }, [isRecording, recordPulseAnim]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current) return;
@@ -419,7 +375,6 @@ function ChatInputBar({
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      // Stop animation
       recordPulseAnim.stopAnimation();
       recordPulseAnim.setValue(0);
 
@@ -429,7 +384,6 @@ function ChatInputBar({
       if (uri && recordingDuration >= 1) {
         setRecordingUri(uri);
 
-        // Generate simple waveform (placeholder)
         const waveform = Array.from({ length: 50 }, () => Math.random() * 100);
 
         Alert.alert(
@@ -478,10 +432,9 @@ function ChatInputBar({
     onPanResponderTerminate: stopRecording,
   });
 
-  // Handle send press
+  // Send handler
   const handleSendPress = useCallback(() => {
-    if (value.trim().length > 0) {
-      // Add button press animation
+    if (hasText) {
       Animated.sequence([
         Animated.timing(recordButtonScale, {
           toValue: 0.9,
@@ -497,18 +450,9 @@ function ChatInputBar({
 
       onSend();
     } else if (!isRecording) {
-      // Start recording
       startRecording();
     }
-  }, [value, onSend, isRecording, startRecording, recordButtonScale]);
-
-  const handleContentSizeChange = useCallback((event: any) => {
-    const newHeight = Math.min(Math.max(event.nativeEvent.contentSize.height, 24), 120);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setInputHeight(newHeight);
-  }, []);
-
-  const showActionIcons = !hasText && !isRecording;
+  }, [hasText, onSend, isRecording, startRecording, recordButtonScale]);
 
   return (
     <View style={[
@@ -547,29 +491,32 @@ function ChatInputBar({
         isFocused && styles.inputWrapperFocused,
         isRecording && styles.inputWrapperRecording,
       ]}>
-        {/* Left side camera icon - always visible */}
+        {/* Camera button - ALWAYS mounted */}
         <TouchableOpacity
           style={styles.leftActionIcon}
           onPress={handleCameraPress}
-          disabled={isLoading}
+          disabled={isLoading || isRecording}
         >
           <Ionicons
             name="camera-outline"
             size={20}
-            color={isLoading ? theme.colors.onSurfaceVariant : theme.colors.onSurfaceVariant}
+            color={theme.colors.onSurfaceVariant}
           />
         </TouchableOpacity>
 
-        {/* Text Input */}
+        {/* Text Input - FULLY FIXED */}
         <TextInput
           ref={textInputRef}
-          style={[styles.textInput, { height: inputHeight}]}
+          style={styles.textInput}
           onChangeText={onChangeText}
+          value={value}
           placeholder={placeholder}
           placeholderTextColor={theme.colors.onSurfaceVariant}
           multiline
-          scrollEnabled={false}
+          scrollEnabled={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
           blurOnSubmit={false}
+          onSubmitEditing={onSend}
           inputAccessoryViewID={Platform.OS === 'ios' ? inputAccessoryViewID : undefined}
           onFocus={() => {
             setIsKeyboardVisible(true);
@@ -579,17 +526,17 @@ function ChatInputBar({
             setIsKeyboardVisible(false);
             onBlur?.();
           }}
-          onContentSizeChange={handleContentSizeChange}
           underlineColorAndroid="transparent"
           editable={!isRecording}
         />
 
-        {/* Right side icons - show when not typing */}
-        {!hasText && (
-          <Animated.View style={[styles.rightIconsContainer, { opacity: fadeAnim }]}>
+        {/* Right icons - ONLY show when NOT typing and NOT recording */}
+        {!hasText && !isRecording && (
+          <View style={styles.rightIconsContainer}>
             <TouchableOpacity
               style={styles.rightActionIcon}
               onPress={handleAttachmentPress}
+              disabled={isRecording}
             >
               <Ionicons
                 name="attach-outline"
@@ -601,6 +548,7 @@ function ChatInputBar({
             <TouchableOpacity
               style={styles.rightActionIcon}
               onPress={handleEmojiPress}
+              disabled={isRecording}
             >
               <Ionicons
                 name="happy-outline"
@@ -608,10 +556,10 @@ function ChatInputBar({
                 color={theme.colors.onSurfaceVariant}
               />
             </TouchableOpacity>
-          </Animated.View>
+          </View>
         )}
 
-        {/* Send/Mic Button */}
+        {/* Send/Mic Button - ALWAYS in same position */}
         <Animated.View
           {...(hasText ? {} : panResponderRef.current?.panHandlers)}
           style={[
@@ -641,10 +589,9 @@ function ChatInputBar({
             disabled={isLoading}
           >
             <Ionicons
-              name={hasText ? "paper-plane" : "mic"}
+              name={hasText ? "send" : "mic"}
               size={18}
               color={hasText ? theme.colors.onPrimary : theme.colors.onSurface}
-              style={hasText ? { transform: [{ rotate: '45deg' }] } : null}
             />
           </TouchableOpacity>
         </Animated.View>
@@ -694,13 +641,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     paddingBottom: Platform.select({ ios: 6, android: 8 }),
   },
   inputContainerRaised: {
-    marginBottom: 44,
+    marginBottom: Platform.select({ ios: 44, android: 0 }),
   },
   recordingIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
+    position: 'relative',
   },
   recordingPulse: {
     position: 'absolute',
@@ -708,7 +656,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     height: 60,
     borderRadius: 30,
     backgroundColor: '#ff4444',
-    opacity: 0.3,
   },
   recordingText: {
     fontSize: 16,
@@ -716,6 +663,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     color: '#ff4444',
     marginLeft: 8,
   },
+  // ✅ FIXED: alignItems center, not flex-end
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -726,8 +674,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     paddingLeft: 8,
     paddingRight: 6,
     paddingVertical: 4,
-    minHeight: 36,
-    maxHeight: 100,
+    minHeight: 44,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -746,36 +693,29 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     borderWidth: 1,
     backgroundColor: 'rgba(255, 244, 244, 0.9)',
   },
+  // ✅ FIXED: iOS paddingVertical = 8, lineHeight = 22
   textInput: {
     flex: 1,
     fontSize: 16,
     color: theme.colors.onSurface,
-    paddingVertical: Platform.select({ ios: 6, android: 4 }),
-    paddingHorizontal: 6,
-    maxHeight: 120,
-    minHeight: 24,
-    lineHeight: 20,
+    lineHeight: Platform.select({ 
+      ios: 22,
+      android: 20
+    }),
+    paddingVertical: Platform.select({
+      ios: 8,
+      android: 8
+    }),
+    paddingHorizontal: 8,
+    minHeight: Platform.select({
+      ios: 38,
+      android: 36
+    }),
+    maxHeight: Platform.select({
+      ios: 150,
+      android: 150
+    }),
     textAlignVertical: 'center',
-  },
-  actionIconsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  toggleButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
   },
   leftActionIcon: {
     width: 32,
@@ -783,24 +723,26 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
-  },
-  rightActionIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 6,
+    marginRight: 4,
+    marginBottom: 2,
   },
   rightIconsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginRight: 4,
   },
-  sendButtonContainer: {
-    marginLeft: 6,
+  rightActionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    marginHorizontal: 2,
+  },
+  sendButtonContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 2,
   },
   sendButton: {
     width: 32,

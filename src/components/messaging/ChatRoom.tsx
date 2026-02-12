@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
+  KeyboardAvoidingView,
   StyleSheet,
   Platform,
   Alert,
@@ -694,48 +695,31 @@ function ChatRoom({
   }, [isNearBottom, messages.length]);
 
   return (
-    <>
+    <View style={{ flex: 1 }}>
+      ✅ Replace your return block with this:
+import { KeyboardAvoidingView } from 'react-native';
+
+return (
+  <View style={{ flex: 1 }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
       <FlatList
         ref={flatListRef}
         data={messages}
         renderItem={renderMessage}
         keyExtractor={keyExtractor}
-        style={styles.messagesList}
-        contentContainerStyle={[
-          styles.messagesContent,
-          isInputFocused && styles.messagesContentKeyboard,
-        ]}
-        onLayout={handleListLayout}
-        onContentSizeChange={handleContentSizeChange}
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.messagesContent}
         ListHeaderComponent={renderHeader}
-        ListHeaderComponentStyle={styles.listHeader}
         stickyHeaderIndices={[0]}
-        onScroll={handleScroll}
-        onScrollBeginDrag={handleScrollBeginDrag}
-        onScrollEndDrag={handleScrollEndDrag}
-        onEndReached={onLoadMore}
-        onEndReachedThreshold={0.5}
-        onScrollToIndexFailed={(info) => {
-          const offset = info.averageItemLength * info.index;
-          flatListRef.current?.scrollToOffset({ offset, animated: false });
-          requestAnimationFrame(() => {
-            flatListRef.current?.scrollToIndex({
-              index: info.index,
-              viewPosition: 1,
-              animated: false,
-            });
-          });
-        }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS === 'android'}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={50}
-        initialNumToRender={15}
-        windowSize={10}
-        maintainVisibleContentPosition={maintainVisiblePosition}
       />
+
       <ChatInputBar
         value={newMessage}
         onChangeText={setNewMessage}
@@ -748,7 +732,9 @@ function ChatRoom({
         onBlur={handleInputBlur}
         inputRef={chatInputRef}
       />
-    </>
+    </KeyboardAvoidingView>
+  </View>
+ </View>
   );
 }
 
