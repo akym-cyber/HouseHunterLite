@@ -126,6 +126,7 @@ function ChatInputBar({
   const isSlideToCancelArmedRef = useRef(false);
   const micPermissionGrantedRef = useRef(false);
   const recordedLevelsRef = useRef<number[]>([]);
+  const keepKeyboardDuringRecordingRef = useRef(false);
   const textInputRef = inputRef ?? useRef<TextInput | null>(null);
 
   // Animation values
@@ -335,6 +336,7 @@ function ChatInputBar({
     recordingRef.current = null;
     pendingStopDiscardRef.current = null;
     recordedLevelsRef.current = [];
+    keepKeyboardDuringRecordingRef.current = false;
     setIsRecording(false);
     setRecordingDuration(0);
     setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
@@ -351,6 +353,19 @@ function ChatInputBar({
     }
     deleteAbsorbProgress.value = 0;
   }, [deleteAbsorbProgress, deleteMorphProgress, isRecording, slideOffsetX]);
+
+  useEffect(() => {
+    if (!isRecording || !keepKeyboardDuringRecordingRef.current) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      textInputRef.current?.focus();
+      setIsKeyboardVisible(true);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [isRecording, textInputRef]);
 
   // Initialize audio
   useEffect(() => {
@@ -729,6 +744,7 @@ function ChatInputBar({
 
   const handleRecordPressIn = useCallback((event: any) => {
     if (!hasText && !isRecording) {
+      keepKeyboardDuringRecordingRef.current = isKeyboardVisible;
       resetSlideToCancel();
       const startX = event?.nativeEvent?.pageX;
       if (typeof startX === 'number') {
@@ -736,7 +752,7 @@ function ChatInputBar({
       }
       void startRecording();
     }
-  }, [hasText, isRecording, resetSlideToCancel, startRecording]);
+  }, [hasText, isKeyboardVisible, isRecording, resetSlideToCancel, startRecording]);
 
   const handleRecordPressOut = useCallback(() => {
     if (!hasText) {
@@ -804,9 +820,10 @@ function ChatInputBar({
 
       onSend();
     } else if (!isRecording) {
+      keepKeyboardDuringRecordingRef.current = isKeyboardVisible;
       void startRecording();
     }
-  }, [hasText, isRecording, onSend, recordButtonScale, startRecording]);
+  }, [hasText, isKeyboardVisible, isRecording, onSend, recordButtonScale, startRecording]);
 
   return (
     <View style={[
@@ -860,69 +877,76 @@ function ChatInputBar({
           </TouchableOpacity>
         )}
 
-        {isRecording ? (
-          <View style={styles.recordingInlineContent}>
-            <Reanimated.View style={[styles.recordingWaveContainer, recordingWaveAnimatedStyle]}>
-              {liveWaveform.map((level, barIndex) => (
-                <View
-                  key={`record-wave-${barIndex}`}
-                  style={[
-                    styles.recordingWaveBar,
-                    {
-                      height: 5 + level * 18,
-                      opacity: 0.55 + level * 0.45,
-                    },
-                  ]}
-                />
-              ))}
-            </Reanimated.View>
-            <View style={styles.recordingRightCluster}>
-              <View style={styles.recordingTimerWrap}>
-                <Text style={styles.recordingTimerText}>{recordingDurationLabel}</Text>
-              </View>
-              <Reanimated.View style={[styles.recordingHintWrap, recordingHintAnimatedStyle]}>
-                <Ionicons
-                  name="chevron-back"
-                  size={14}
-                  color={isSlideToCancelArmed ? theme.colors.error : theme.colors.onSurfaceVariant}
-                />
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.recordingHintText,
-                    isSlideToCancelArmed && styles.recordingHintTextArmed,
-                  ]}
-                >
-                   {isSlideToCancelArmed ? 'Deleted' : 'Slide to cancel'}
-                </Text>
+        <TextInput
+          ref={textInputRef}
+          style={[
+            styles.textInput,
+            isRecording && styles.textInputRecordingHidden,
+          ]}
+          onChangeText={onChangeText}
+          value={value}
+          placeholder={placeholder}
+          placeholderTextColor={theme.colors.onSurfaceVariant}
+          multiline
+          scrollEnabled={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
+          blurOnSubmit={false}
+          onSubmitEditing={onSend}
+          inputAccessoryViewID={Platform.OS === 'ios' ? inputAccessoryViewID : undefined}
+          onFocus={() => {
+            setIsKeyboardVisible(true);
+            onFocus?.();
+          }}
+          onBlur={() => {
+            if (!keepKeyboardDuringRecordingRef.current) {
+              setIsKeyboardVisible(false);
+            }
+            onBlur?.();
+          }}
+          underlineColorAndroid="transparent"
+          editable={!isRecording || keepKeyboardDuringRecordingRef.current}
+        />
+
+        {isRecording && (
+          <View style={styles.recordingInlineOverlay} pointerEvents="none">
+            <View style={styles.recordingInlineContent}>
+              <Reanimated.View style={[styles.recordingWaveContainer, recordingWaveAnimatedStyle]}>
+                {liveWaveform.map((level, barIndex) => (
+                  <View
+                    key={`record-wave-${barIndex}`}
+                    style={[
+                      styles.recordingWaveBar,
+                      {
+                        height: 5 + level * 18,
+                        opacity: 0.55 + level * 0.45,
+                      },
+                    ]}
+                  />
+                ))}
               </Reanimated.View>
+              <View style={styles.recordingRightCluster}>
+                <View style={styles.recordingTimerWrap}>
+                  <Text style={styles.recordingTimerText}>{recordingDurationLabel}</Text>
+                </View>
+                <Reanimated.View style={[styles.recordingHintWrap, recordingHintAnimatedStyle]}>
+                  <Ionicons
+                    name="chevron-back"
+                    size={14}
+                    color={isSlideToCancelArmed ? theme.colors.error : theme.colors.onSurfaceVariant}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.recordingHintText,
+                      isSlideToCancelArmed && styles.recordingHintTextArmed,
+                    ]}
+                  >
+                     {isSlideToCancelArmed ? 'Deleted' : 'Slide to cancel'}
+                  </Text>
+                </Reanimated.View>
+              </View>
             </View>
           </View>
-        ) : (
-          <TextInput
-            ref={textInputRef}
-            style={styles.textInput}
-            onChangeText={onChangeText}
-            value={value}
-            placeholder={placeholder}
-            placeholderTextColor={theme.colors.onSurfaceVariant}
-            multiline
-            scrollEnabled={Platform.OS === 'ios'}
-            showsVerticalScrollIndicator={false}
-            blurOnSubmit={false}
-            onSubmitEditing={onSend}
-            inputAccessoryViewID={Platform.OS === 'ios' ? inputAccessoryViewID : undefined}
-            onFocus={() => {
-              setIsKeyboardVisible(true);
-              onFocus?.();
-            }}
-            onBlur={() => {
-              setIsKeyboardVisible(false);
-              onBlur?.();
-            }}
-            underlineColorAndroid="transparent"
-            editable={!isRecording}
-          />
         )}
 
         {!hasText && !isRecording && (
@@ -1041,6 +1065,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
+    position: 'relative',
     backgroundColor: theme.colors.surface,
     borderRadius: 20,
     borderWidth: 1,
@@ -1071,6 +1096,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
+  },
+  recordingInlineOverlay: {
+    position: 'absolute',
+    left: 44,
+    right: 42,
+    top: 3,
+    bottom: 3,
+    justifyContent: 'center',
   },
   recordingWaveContainer: {
     flex: 1,
@@ -1161,6 +1194,9 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
       android: 150
     }),
     textAlignVertical: 'center',
+  },
+  textInputRecordingHidden: {
+    opacity: 0,
   },
   leftActionIcon: {
     width: 32,
