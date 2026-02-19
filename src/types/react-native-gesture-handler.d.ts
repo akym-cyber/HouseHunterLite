@@ -9,5 +9,7 @@ declare module 'react-native-gesture-handler' {
   export const FlatList: ComponentClass<any>;
   export const PanGestureHandler: ComponentClass<any>;
   export const TapGestureHandler: ComponentClass<any>;
+  export const GestureDetector: ComponentClass<any>;
+  export const Gesture: any;
   export const State: any;
 }

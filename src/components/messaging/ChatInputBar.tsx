@@ -10,7 +10,6 @@ import {
   Modal,
   FlatList,
   Animated,
-  PanResponder,
   Dimensions,
   Keyboard,
 } from 'react-native';
@@ -29,6 +28,7 @@ import Reanimated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useTheme } from '../../theme/useTheme';
 import { Message, MessageMedia } from '../../types/database';
 
@@ -41,6 +41,54 @@ const DELETE_ABSORB_DURATION_MS = 200;
 const METER_MIN_DB = -55;
 const METER_MAX_DB = -5;
 const WAVE_RESPONSE_ALPHA = 0.62;
+const FAST_RECORDING_OPTIONS = {
+  ...Audio.RecordingOptionsPresets.LOW_QUALITY,
+  keepAudioActiveHint: true,
+  isMeteringEnabled: true,
+  android: {
+    ...Audio.RecordingOptionsPresets.LOW_QUALITY.android,
+    extension: '.m4a',
+    outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
+    audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+  },
+  ios: {
+    ...Audio.RecordingOptionsPresets.LOW_QUALITY.ios,
+    extension: '.m4a',
+    audioQuality: Audio.RECORDING_OPTION_IOS_AUDIO_QUALITY_MEDIUM,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+};
+let recordingPrepareLock: Promise<void> | null = null;
+
+const withRecordingPrepareLock = async <T,>(task: () => Promise<T>): Promise<T> => {
+  while (recordingPrepareLock) {
+    await recordingPrepareLock.catch(() => undefined);
+  }
+
+  let releaseLock: () => void = () => undefined;
+  const lockPromise = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  recordingPrepareLock = lockPromise;
+
+  try {
+    return await task();
+  } finally {
+    if (recordingPrepareLock === lockPromise) {
+      recordingPrepareLock = null;
+    }
+    releaseLock();
+  }
+};
+
 const percent = (values: number[], ratio: number): number => {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -112,17 +160,27 @@ function ChatInputBar({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isSlideToCancelArmed, setIsSlideToCancelArmed] = useState(false);
+  const [showDeletedHint, setShowDeletedHint] = useState(false);
   const [liveWaveform, setLiveWaveform] = useState<number[]>(
     () => Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12)
   );
 
   // Refs
   const recordingRef = useRef<any>(null);
+  const preparedRecordingRef = useRef<any>(null);
+  const prepareRecordingPromiseRef = useRef<Promise<void> | null>(null);
+  const preparingRecordingRef = useRef<any>(null);
   const recordingTimerRef = useRef<number | null>(null);
+  const recordingWarmupWaveTimerRef = useRef<number | null>(null);
+  const recordingDurationRef = useRef(0);
+  const isMountedRef = useRef(true);
+  const isPreparingRef = useRef(false);
   const isStartingRecordingRef = useRef(false);
+  const isRecordingUiRef = useRef(false);
+  const isMicPressActiveRef = useRef(false);
+  const hasMeteringSampleRef = useRef(false);
+  const pendingGestureFinalizeRef = useRef<boolean | null>(null);
   const pendingStopDiscardRef = useRef<boolean | null>(null);
-  const recordPanResponderRef = useRef<any>(null);
-  const slideStartXRef = useRef(0);
   const isSlideToCancelArmedRef = useRef(false);
   const micPermissionGrantedRef = useRef(false);
   const recordedLevelsRef = useRef<number[]>([]);
@@ -134,6 +192,9 @@ function ChatInputBar({
   const slideOffsetX = useSharedValue(0);
   const deleteMorphProgress = useSharedValue(0);
   const deleteAbsorbProgress = useSharedValue(0);
+  const isMicGestureActiveShared = useSharedValue(false);
+  const isSlideCancelArmedShared = useSharedValue(false);
+  const isMicGestureFinalizeHandledShared = useSharedValue(false);
 
   const hasText = value.trim().length > 0;
   const recordingDurationLabel = useMemo(() => {
@@ -149,38 +210,23 @@ function ChatInputBar({
     }
   }, []);
 
+  const clearWarmupWaveTimer = useCallback(() => {
+    if (recordingWarmupWaveTimerRef.current) {
+      clearInterval(recordingWarmupWaveTimerRef.current);
+      recordingWarmupWaveTimerRef.current = null;
+    }
+  }, []);
+
   const resetSlideToCancel = useCallback(() => {
-    slideStartXRef.current = 0;
     isSlideToCancelArmedRef.current = false;
+    isSlideCancelArmedShared.value = false;
+    isMicGestureFinalizeHandledShared.value = false;
     slideOffsetX.value = 0;
     deleteMorphProgress.value = 0;
     deleteAbsorbProgress.value = 0;
     setIsSlideToCancelArmed(false);
-  }, [deleteAbsorbProgress, deleteMorphProgress, slideOffsetX]);
-
-  const updateSlideToCancel = useCallback((currentPageX: number) => {
-    if (slideStartXRef.current === 0) {
-      slideStartXRef.current = currentPageX;
-    }
-
-    const delta = currentPageX - slideStartXRef.current;
-    const clamped = Math.max(-MAX_SLIDE_DISTANCE, Math.min(0, delta));
-    slideOffsetX.value = clamped;
-    deleteMorphProgress.value = clampNumber(
-      Math.abs(clamped) / Math.abs(SLIDE_CANCEL_THRESHOLD),
-      0,
-      1
-    );
-
-    const shouldArm = clamped <= SLIDE_CANCEL_THRESHOLD;
-    if (shouldArm !== isSlideToCancelArmedRef.current) {
-      if (shouldArm) {
-        void Haptics.selectionAsync();
-      }
-      isSlideToCancelArmedRef.current = shouldArm;
-      setIsSlideToCancelArmed(shouldArm);
-    }
-  }, [deleteMorphProgress, slideOffsetX]);
+    setShowDeletedHint(false);
+  }, [deleteAbsorbProgress, deleteMorphProgress, isMicGestureFinalizeHandledShared, isSlideCancelArmedShared, slideOffsetX]);
 
   const recordingHintAnimatedStyle = useAnimatedStyle(() => {
     const opacity = interpolate(
@@ -331,18 +377,164 @@ function ChatInputBar({
     });
   }, []);
 
+  const stopAndUnloadSafely = useCallback(async (recording: any) => {
+    if (!recording) return;
+    try {
+      recording.setOnRecordingStatusUpdate(null);
+    } catch {
+      // ignore callback cleanup errors
+    }
+    try {
+      await recording.stopAndUnloadAsync();
+    } catch {
+      // ignore stop/unload errors
+    }
+  }, []);
+
+  const startWarmupWaveAnimation = useCallback(() => {
+    clearWarmupWaveTimer();
+    recordingWarmupWaveTimerRef.current = setInterval(() => {
+      if (hasMeteringSampleRef.current || !isRecordingUiRef.current) {
+        return;
+      }
+      setLiveWaveform((prev) => {
+        const next = prev.slice(1);
+        const oscillation = Math.abs(Math.sin(Date.now() / 210));
+        const level = clampNumber(0.14 + oscillation * 0.2 + Math.random() * 0.04, 0.1, 0.48);
+        next.push(level);
+        return next;
+      });
+    }, 90);
+  }, [clearWarmupWaveTimer]);
+
+  const prepareRecorderInBackground = useCallback(async () => {
+    if (!micPermissionGrantedRef.current) return;
+    if (
+      preparedRecordingRef.current ||
+      prepareRecordingPromiseRef.current ||
+      preparingRecordingRef.current ||
+      recordingRef.current ||
+      isStartingRecordingRef.current ||
+      isPreparingRef.current
+    ) {
+      return;
+    }
+
+    const preparePromise = withRecordingPrepareLock(async () => {
+      if (
+        !isMountedRef.current ||
+        recordingRef.current ||
+        preparedRecordingRef.current ||
+        preparingRecordingRef.current
+      ) {
+        return;
+      }
+
+      const recording = new Audio.Recording();
+      preparingRecordingRef.current = recording;
+      isPreparingRef.current = true;
+      try {
+        await recording.prepareToRecordAsync(FAST_RECORDING_OPTIONS);
+        if (
+          isMountedRef.current &&
+          !recordingRef.current &&
+          !preparedRecordingRef.current
+        ) {
+          preparedRecordingRef.current = recording;
+          return;
+        }
+        await stopAndUnloadSafely(recording);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('Only one Recording object can be prepared at a given time')) {
+          console.error('Recorder pre-initialize error:', error);
+        }
+        await stopAndUnloadSafely(recording);
+      } finally {
+        if (preparingRecordingRef.current === recording) {
+          preparingRecordingRef.current = null;
+        }
+        isPreparingRef.current = false;
+      }
+    });
+
+    prepareRecordingPromiseRef.current = preparePromise;
+    try {
+      await preparePromise;
+    } finally {
+      if (prepareRecordingPromiseRef.current === preparePromise) {
+        prepareRecordingPromiseRef.current = null;
+      }
+    }
+  }, [stopAndUnloadSafely]);
+
+  const acquirePreparedRecording = useCallback(async (): Promise<any> => {
+    if (preparedRecordingRef.current) {
+      const readyRecording = preparedRecordingRef.current;
+      preparedRecordingRef.current = null;
+      return readyRecording;
+    }
+
+    if (prepareRecordingPromiseRef.current) {
+      try {
+        await prepareRecordingPromiseRef.current;
+      } catch {
+        // ignore prepare races and fallback to inline prepare
+      }
+      if (preparedRecordingRef.current) {
+        const readyRecording = preparedRecordingRef.current;
+        preparedRecordingRef.current = null;
+        return readyRecording;
+      }
+    }
+
+    return withRecordingPrepareLock(async () => {
+      if (preparedRecordingRef.current) {
+        const readyRecording = preparedRecordingRef.current;
+        preparedRecordingRef.current = null;
+        return readyRecording;
+      }
+
+      const recording = new Audio.Recording();
+      preparingRecordingRef.current = recording;
+      isPreparingRef.current = true;
+      try {
+        await recording.prepareToRecordAsync(FAST_RECORDING_OPTIONS);
+        return recording;
+      } catch (error) {
+        await stopAndUnloadSafely(recording);
+        throw error;
+      } finally {
+        if (preparingRecordingRef.current === recording) {
+          preparingRecordingRef.current = null;
+        }
+        isPreparingRef.current = false;
+      }
+    });
+  }, [stopAndUnloadSafely]);
+
   const resetRecordingState = useCallback(() => {
+    isMicPressActiveRef.current = false;
     isStartingRecordingRef.current = false;
+    isRecordingUiRef.current = false;
+    isMicGestureActiveShared.value = false;
+    isMicGestureFinalizeHandledShared.value = false;
     recordingRef.current = null;
+    pendingGestureFinalizeRef.current = null;
     pendingStopDiscardRef.current = null;
     recordedLevelsRef.current = [];
+    hasMeteringSampleRef.current = false;
+    recordingDurationRef.current = 0;
     keepKeyboardDuringRecordingRef.current = false;
+    isPreparingRef.current = false;
     setIsRecording(false);
     setRecordingDuration(0);
+    setShowDeletedHint(false);
     setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
     resetSlideToCancel();
     clearRecordingTimer();
-  }, [clearRecordingTimer, resetSlideToCancel]);
+    clearWarmupWaveTimer();
+  }, [clearRecordingTimer, clearWarmupWaveTimer, isMicGestureActiveShared, isMicGestureFinalizeHandledShared, resetSlideToCancel]);
 
   useEffect(() => {
     if (!isRecording) {
@@ -388,20 +580,42 @@ function ChatInputBar({
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
+
+        if (granted) {
+          await prepareRecorderInBackground();
+        }
       } catch (error) {
         console.error('Audio setup error:', error);
       }
     };
 
     setupAudio();
-  }, []);
+  }, [prepareRecorderInBackground]);
 
   // Cleanup recording timer
   useEffect(() => {
     return () => {
       clearRecordingTimer();
+      clearWarmupWaveTimer();
     };
-  }, [clearRecordingTimer]);
+  }, [clearRecordingTimer, clearWarmupWaveTimer]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isPreparingRef.current = false;
+      const activeRecording = recordingRef.current;
+      const preparedRecording = preparedRecordingRef.current;
+      const preparingRecording = preparingRecordingRef.current;
+      recordingRef.current = null;
+      preparedRecordingRef.current = null;
+      preparingRecordingRef.current = null;
+      prepareRecordingPromiseRef.current = null;
+      void stopAndUnloadSafely(activeRecording);
+      void stopAndUnloadSafely(preparedRecording);
+      void stopAndUnloadSafely(preparingRecording);
+    };
+  }, [stopAndUnloadSafely]);
 
   // Keyboard visibility tracking
   useEffect(() => {
@@ -573,8 +787,9 @@ function ChatInputBar({
   }, []);
 
   const stopRecording = useCallback(async (discard = false) => {
+    isMicPressActiveRef.current = false;
     if (!recordingRef.current) {
-      if (isStartingRecordingRef.current || isRecording) {
+      if (isStartingRecordingRef.current || isRecordingUiRef.current) {
         pendingStopDiscardRef.current = discard;
       }
       return;
@@ -583,11 +798,12 @@ function ChatInputBar({
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      const activeRecording = recordingRef.current;
-      activeRecording?.setOnRecordingStatusUpdate?.(null);
+      const activeRecording = recordingRef.current as any;
+      recordingRef.current = null;
+      activeRecording?.setOnRecordingStatusUpdate(null);
       await activeRecording.stopAndUnloadAsync();
       const uri = activeRecording.getURI();
-      const finalDuration = recordingDuration;
+      const finalDuration = recordingDurationRef.current;
 
       if (!discard && uri && finalDuration >= 1) {
         const waveform = buildVoiceWaveform(recordedLevelsRef.current);
@@ -600,26 +816,21 @@ function ChatInputBar({
       } else if (!discard) {
         Alert.alert('Recording too short', 'Please record for at least 1 second.');
       }
-
-      recordingRef.current = null;
-      isStartingRecordingRef.current = false;
-      pendingStopDiscardRef.current = null;
-      resetRecordingState();
-
     } catch (error) {
       console.error('Recording stop error:', error);
+      Alert.alert('Error', 'Failed to stop recording.');
+    } finally {
       recordingRef.current = null;
       isStartingRecordingRef.current = false;
       pendingStopDiscardRef.current = null;
       resetRecordingState();
-      Alert.alert('Error', 'Failed to stop recording.');
+      void prepareRecorderInBackground();
     }
-  }, [buildVoiceWaveform, isRecording, onSendVoice, recordingDuration, resetRecordingState]);
+  }, [buildVoiceWaveform, onSendVoice, prepareRecorderInBackground, resetRecordingState]);
 
   // Voice recording
-  const startRecording = useCallback(async () => {
-    if (isRecording || recordingRef.current || isStartingRecordingRef.current) return;
-    isStartingRecordingRef.current = true;
+  const startRecordingInBackground = useCallback(async () => {
+    let attemptedRecording: any = null;
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -636,52 +847,16 @@ function ChatInputBar({
       }
 
       if (status !== 'granted') {
-        isStartingRecordingRef.current = false;
-        Alert.alert(
-          'Microphone Permission Required',
-          'Please enable microphone access in settings to record voice messages.',
-          [{ text: 'OK' }]
-        );
-        return;
+        throw new Error('MIC_PERMISSION_DENIED');
       }
 
-      setIsRecording(true);
-      setRecordingDuration(0);
-      recordedLevelsRef.current = [];
-      setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
-      pendingStopDiscardRef.current = null;
+      attemptedRecording = await acquirePreparedRecording();
+      recordingRef.current = attemptedRecording;
 
-      const recording = new Audio.Recording();
-      recordingRef.current = recording;
-
-      await recording.prepareToRecordAsync({
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        keepAudioActiveHint: true,
-        isMeteringEnabled: true,
-        android: {
-          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.android,
-          extension: '.m4a',
-          outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
-          audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-        },
-        ios: {
-          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
-          extension: '.m4a',
-          audioQuality: Audio.RECORDING_OPTION_IOS_AUDIO_QUALITY_HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-      });
-
-      recording.setOnRecordingStatusUpdate((status: any) => {
+      attemptedRecording.setOnRecordingStatusUpdate((status: any) => {
         if (!status?.canRecord) return;
+        hasMeteringSampleRef.current = true;
+        clearWarmupWaveTimer();
         const normalized = normalizeMetering(status.metering);
         const point = Math.round(normalized * 100);
         recordedLevelsRef.current.push(point);
@@ -696,15 +871,9 @@ function ChatInputBar({
           return next;
         });
       });
-      recording.setProgressUpdateInterval(55);
-
-      await recording.startAsync();
+      attemptedRecording.setProgressUpdateInterval(55);
+      await attemptedRecording.startAsync();
       isStartingRecordingRef.current = false;
-
-      clearRecordingTimer();
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
 
       // If the user already released before recorder was ready, finish now.
       if (pendingStopDiscardRef.current !== null) {
@@ -717,15 +886,71 @@ function ChatInputBar({
       recordingRef.current = null;
       isStartingRecordingRef.current = false;
       pendingStopDiscardRef.current = null;
+      hasMeteringSampleRef.current = false;
+      await stopAndUnloadSafely(attemptedRecording);
       resetRecordingState();
-      Alert.alert('Error', 'Failed to start recording.');
+      if (error instanceof Error && error.message === 'MIC_PERMISSION_DENIED') {
+        Alert.alert(
+          'Microphone Permission Required',
+          'Please enable microphone access in settings to record voice messages.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to start recording.');
+      }
+      void prepareRecorderInBackground();
     }
-  }, [clearRecordingTimer, isRecording, normalizeMetering, resetRecordingState, stopRecording]);
+  }, [
+    acquirePreparedRecording,
+    clearWarmupWaveTimer,
+    normalizeMetering,
+    prepareRecorderInBackground,
+    resetRecordingState,
+    stopAndUnloadSafely,
+    stopRecording,
+  ]);
+
+  const startRecording = useCallback(() => {
+    if (isRecordingUiRef.current || isMicPressActiveRef.current || recordingRef.current || isStartingRecordingRef.current) {
+      return;
+    }
+
+    isMicPressActiveRef.current = true;
+    isRecordingUiRef.current = true;
+    isStartingRecordingRef.current = true;
+    keepKeyboardDuringRecordingRef.current = isKeyboardVisible;
+    resetSlideToCancel();
+
+    pendingStopDiscardRef.current = null;
+    recordedLevelsRef.current = [];
+    hasMeteringSampleRef.current = false;
+    recordingDurationRef.current = 0;
+    setRecordingDuration(0);
+    setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
+    setIsRecording(true);
+
+    clearRecordingTimer();
+    recordingTimerRef.current = setInterval(() => {
+      recordingDurationRef.current += 1;
+      setRecordingDuration(recordingDurationRef.current);
+    }, 1000);
+    startWarmupWaveAnimation();
+
+    const deferredFinalize = pendingGestureFinalizeRef.current;
+    if (deferredFinalize !== null) {
+      pendingGestureFinalizeRef.current = null;
+      pendingStopDiscardRef.current = deferredFinalize;
+    }
+
+    void startRecordingInBackground();
+  }, [clearRecordingTimer, isKeyboardVisible, resetSlideToCancel, startRecordingInBackground, startWarmupWaveAnimation]);
 
   const cancelRecording = useCallback(() => {
+    clearRecordingTimer();
+    clearWarmupWaveTimer();
     resetSlideToCancel();
     void stopRecording(true);
-  }, [resetSlideToCancel, stopRecording]);
+  }, [clearRecordingTimer, clearWarmupWaveTimer, resetSlideToCancel, stopRecording]);
 
   const playDeleteDiscardAnimation = useCallback(() => {
     deleteAbsorbProgress.value = withTiming(
@@ -742,65 +967,108 @@ function ChatInputBar({
     );
   }, [deleteAbsorbProgress, stopRecording]);
 
-  const handleRecordPressIn = useCallback((event: any) => {
-    if (!hasText && !isRecording) {
-      keepKeyboardDuringRecordingRef.current = isKeyboardVisible;
-      resetSlideToCancel();
-      const startX = event?.nativeEvent?.pageX;
-      if (typeof startX === 'number') {
-        slideStartXRef.current = startX;
-      }
-      void startRecording();
+  const setSlideCancelArmed = useCallback((armed: boolean) => {
+    if (armed === isSlideToCancelArmedRef.current) {
+      return;
     }
-  }, [hasText, isKeyboardVisible, isRecording, resetSlideToCancel, startRecording]);
-
-  const handleRecordPressOut = useCallback(() => {
-    if (!hasText) {
-      const shouldDiscard = isSlideToCancelArmedRef.current;
-      if (shouldDiscard && isRecording) {
-        playDeleteDiscardAnimation();
-        return;
-      }
-      resetSlideToCancel();
-      void stopRecording(shouldDiscard);
+    if (armed) {
+      void Haptics.selectionAsync();
     }
-  }, [hasText, isRecording, playDeleteDiscardAnimation, resetSlideToCancel, stopRecording]);
+    isSlideToCancelArmedRef.current = armed;
+    setIsSlideToCancelArmed(armed);
+  }, []);
 
-  const handleRecordTouchCancel = useCallback(() => {
-    if (!hasText) {
-      resetSlideToCancel();
-      void stopRecording(true);
+  const finishMicGesture = useCallback((shouldDiscard: boolean) => {
+    if (!isMicPressActiveRef.current) {
+      if (isStartingRecordingRef.current || isRecordingUiRef.current) {
+        pendingGestureFinalizeRef.current = shouldDiscard;
+      }
+      return;
     }
-  }, [hasText, resetSlideToCancel, stopRecording]);
+    isMicPressActiveRef.current = false;
+    clearRecordingTimer();
+    clearWarmupWaveTimer();
 
-  recordPanResponderRef.current = PanResponder.create({
-    onStartShouldSetPanResponder: () => !hasText,
-    onMoveShouldSetPanResponder: (_, gestureState) =>
-      !hasText && (Math.abs(gestureState.dx) > 2 || isRecording || isStartingRecordingRef.current),
-    onPanResponderGrant: (event) => {
-      handleRecordPressIn(event);
-    },
-    onPanResponderMove: (event, gestureState) => {
-      if (hasText) return;
-      if (typeof gestureState?.moveX === 'number') {
-        updateSlideToCancel(gestureState.moveX);
-        return;
-      }
-      const pageX = event?.nativeEvent?.pageX;
-      if (typeof pageX === 'number') {
-        updateSlideToCancel(pageX);
-        return;
-      }
-      updateSlideToCancel(slideStartXRef.current + gestureState.dx);
-    },
-    onPanResponderRelease: () => {
-      handleRecordPressOut();
-    },
-    onPanResponderTerminate: () => {
-      handleRecordTouchCancel();
-    },
-    onPanResponderTerminationRequest: () => false,
-  });
+    if (shouldDiscard && isRecordingUiRef.current) {
+      setShowDeletedHint(true);
+      playDeleteDiscardAnimation();
+      return;
+    }
+    resetSlideToCancel();
+    void stopRecording(shouldDiscard);
+  }, [
+    clearRecordingTimer,
+    clearWarmupWaveTimer,
+    playDeleteDiscardAnimation,
+    resetSlideToCancel,
+    stopRecording,
+  ]);
+
+  const micPanGesture = useMemo(() => (
+    Gesture.Pan()
+      .enabled(!hasText && !isLoading)
+      .shouldCancelWhenOutside(false)
+      .minDistance(0)
+      .onBegin(() => {
+        if (isMicGestureActiveShared.value) return;
+
+        isMicGestureFinalizeHandledShared.value = false;
+        isMicGestureActiveShared.value = true;
+        isSlideCancelArmedShared.value = false;
+        slideOffsetX.value = 0;
+        deleteMorphProgress.value = 0;
+        deleteAbsorbProgress.value = 0;
+        runOnJS(setSlideCancelArmed)(false);
+        runOnJS(startRecording)();
+      })
+      .onUpdate((event) => {
+        if (!isMicGestureActiveShared.value) return;
+
+        const clamped = Math.max(-MAX_SLIDE_DISTANCE, Math.min(0, event.translationX));
+        slideOffsetX.value = clamped;
+        deleteMorphProgress.value = Math.max(
+          0,
+          Math.min(1, Math.abs(clamped) / Math.abs(SLIDE_CANCEL_THRESHOLD))
+        );
+
+        const shouldArm = clamped <= SLIDE_CANCEL_THRESHOLD;
+        if (shouldArm !== isSlideCancelArmedShared.value) {
+          isSlideCancelArmedShared.value = shouldArm;
+          runOnJS(setSlideCancelArmed)(shouldArm);
+        }
+      })
+      .onTouchesUp(() => {
+        if (isMicGestureFinalizeHandledShared.value) return;
+        isMicGestureFinalizeHandledShared.value = true;
+        isMicGestureActiveShared.value = false;
+        runOnJS(finishMicGesture)(isSlideCancelArmedShared.value);
+      })
+      .onTouchesCancelled(() => {
+        if (isMicGestureFinalizeHandledShared.value) return;
+        isMicGestureFinalizeHandledShared.value = true;
+        isMicGestureActiveShared.value = false;
+        runOnJS(finishMicGesture)(true);
+      })
+      .onFinalize((_event, success) => {
+        if (isMicGestureFinalizeHandledShared.value) return;
+        isMicGestureFinalizeHandledShared.value = true;
+        isMicGestureActiveShared.value = false;
+        const shouldDiscard = success === false || isSlideCancelArmedShared.value;
+        runOnJS(finishMicGesture)(shouldDiscard);
+      })
+  ), [
+    deleteAbsorbProgress,
+    deleteMorphProgress,
+    finishMicGesture,
+    hasText,
+    isLoading,
+    isMicGestureActiveShared,
+    isMicGestureFinalizeHandledShared,
+    isSlideCancelArmedShared,
+    setSlideCancelArmed,
+    slideOffsetX,
+    startRecording,
+  ]);
 
   // Send handler
   const handleSendPress = useCallback(() => {
@@ -819,11 +1087,8 @@ function ChatInputBar({
       ]).start();
 
       onSend();
-    } else if (!isRecording) {
-      keepKeyboardDuringRecordingRef.current = isKeyboardVisible;
-      void startRecording();
     }
-  }, [hasText, isKeyboardVisible, isRecording, onSend, recordButtonScale, startRecording]);
+  }, [hasText, onSend, recordButtonScale]);
 
   return (
     <View style={[
@@ -928,22 +1193,33 @@ function ChatInputBar({
                 <View style={styles.recordingTimerWrap}>
                   <Text style={styles.recordingTimerText}>{recordingDurationLabel}</Text>
                 </View>
-                <Reanimated.View style={[styles.recordingHintWrap, recordingHintAnimatedStyle]}>
-                  <Ionicons
-                    name="chevron-back"
-                    size={14}
-                    color={isSlideToCancelArmed ? theme.colors.error : theme.colors.onSurfaceVariant}
-                  />
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.recordingHintText,
-                      isSlideToCancelArmed && styles.recordingHintTextArmed,
-                    ]}
-                  >
-                     {isSlideToCancelArmed ? 'Deleted' : 'Slide to cancel'}
-                  </Text>
-                </Reanimated.View>
+                <View style={styles.recordingHintWrap}>
+                  <Reanimated.View style={[styles.recordingHintMovingWrap, recordingHintAnimatedStyle]}>
+                    <Ionicons
+                      name="chevron-back"
+                      size={14}
+                      color={theme.colors.onSurfaceVariant}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={styles.recordingHintText}
+                    >
+                      {'Slide to cancel'}
+                    </Text>
+                  </Reanimated.View>
+                  {showDeletedHint && (
+                    <View style={styles.recordingHintDeletedWrap}>
+                      <Ionicons
+                        name="chevron-back"
+                        size={14}
+                        color={theme.colors.error}
+                      />
+                      <Text numberOfLines={1} style={styles.recordingHintDeletedText}>
+                        {'Deleted'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </View>
           </View>
@@ -979,7 +1255,6 @@ function ChatInputBar({
 
         {/* Send/Mic Button - ALWAYS in same position */}
         <Animated.View
-          {...(!hasText ? recordPanResponderRef.current?.panHandlers : {})}
           style={[
             styles.sendButtonContainer,
             {
@@ -992,27 +1267,43 @@ function ChatInputBar({
             },
           ]}
         >
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              {
-                backgroundColor: hasText
-                    ? theme.colors.primary
-                    : theme.colors.secondary,
-              }
-            ]}
-            onPress={handleSendPress}
-            disabled={isLoading}
-          >
-            <View style={hasText ? styles.sendIconOffset : null}>
-              <Ionicons
-                name={hasText ? "paper-plane" : "mic"}
-                size={18}
-                color={hasText ? theme.colors.onPrimary : theme.colors.onSurface}
-                style={hasText ? { transform: [{ rotate: '45deg' }] } : null}
-              />
-            </View>
-          </TouchableOpacity>
+          {hasText ? (
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                { backgroundColor: theme.colors.primary },
+              ]}
+              onPress={handleSendPress}
+              disabled={isLoading}
+            >
+              <View style={styles.sendIconOffset}>
+                <Ionicons
+                  name="paper-plane"
+                  size={18}
+                  color={theme.colors.onPrimary}
+                  style={{ transform: [{ rotate: '45deg' }] }}
+                />
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <GestureDetector gesture={micPanGesture}>
+              <Reanimated.View
+                style={[
+                  styles.sendButton,
+                  {
+                    backgroundColor: theme.colors.secondary,
+                    opacity: isLoading ? 0.6 : 1,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="mic"
+                  size={18}
+                  color={theme.colors.onSurface}
+                />
+              </Reanimated.View>
+            </GestureDetector>
+          )}
         </Animated.View>
       </View>
 
@@ -1109,7 +1400,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 6,
+    marginRight: 8,
   },
   recordingRightCluster: {
     width: 168,
@@ -1135,11 +1426,32 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginLeft: 2,
   },
   recordingHintWrap: {
-    width: 114,
+    width: 108,
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
     flexShrink: 0,
+  },
+  recordingHintMovingWrap: {
+    width: 108,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexShrink: 0,
+  },
+  recordingHintDeletedWrap: {
+    position: 'absolute',
+    left: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recordingHintDeletedText: {
+    fontSize: 12,
+    lineHeight: 15,
+    color: theme.colors.error,
+    fontWeight: '600',
+    width: 54,
   },
   recordingIconLayer: {
     position: 'absolute',
@@ -1154,10 +1466,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginRight: 4,
     alignSelf: 'flex-end',
     marginBottom: 2,
-  },
-  recordingHintTextArmed: {
-    color: theme.colors.error,
-    fontWeight: '600',
   },
   recordingTimerWrap: {
     width: 48,
