@@ -403,9 +403,18 @@ const AudioPlayerWeb: React.FC<AudioPlayerProps> = ({
 
         {isUploading ? (
           <View style={styles.metaStack}>
-            <Text style={[styles.duration, isOwnMessage ? styles.durationOwn : styles.durationOther]}>
-              Uploading {Math.round(uploadRatio * 100)}%
-            </Text>
+            <View style={styles.metaRow}>
+              <Text style={[styles.duration, isOwnMessage ? styles.durationOwn : styles.durationOther]}>
+                Uploading {Math.round(uploadRatio * 100)}%
+              </Text>
+              <View style={styles.timeRow}>
+                {sentTime ? (
+                  <Text style={[styles.sentTime, isOwnMessage ? styles.durationOwn : styles.durationOther]}>
+                    {sentTime}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
             <View style={styles.uploadBar}>
               <View style={[styles.uploadProgress, { width: `${Math.round(uploadRatio * 100)}%` }]} />
             </View>

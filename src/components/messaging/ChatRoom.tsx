@@ -38,6 +38,13 @@ interface ChatRoomProps {
   messages: Message[];
   onSendMessage: (content: string, replyTo?: string, media?: any[]) => Promise<void>;
   onLoadMore: () => Promise<void>;
+  onDeleteMessageForMe?: (message: Message) => Promise<void> | void;
+  onDeleteMessageForEveryone?: (message: Message) => Promise<void> | void;
+  onSendVoiceMessage?: (voiceData: any) => Promise<void> | void;
+  onRetryVoice?: (message: Message) => Promise<void> | void;
+  propertyReferences?: Property[];
+  onPropertyPress?: (propertyId: string) => void;
+  onSendPropertyOffer?: (propertyId: string) => Promise<void> | void;
   loading?: boolean;
   onBack?: () => void;
   otherUser?: {
@@ -58,6 +65,8 @@ function ChatRoom({
   messages,
   onSendMessage,
   onLoadMore,
+  onDeleteMessageForMe,
+  onDeleteMessageForEveryone,
   loading = false,
   onBack,
   otherUser,
@@ -79,6 +88,7 @@ function ChatRoom({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [inputBarHeight, setInputBarHeight] = useState(0);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const listMessages = useMemo(() => [...messages].reverse(), [messages]);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
@@ -272,11 +282,11 @@ function ChatRoom({
       } else if (timestamp instanceof Date) {
         messageTime = timestamp;
       } else {
-        return '';
+        messageTime = new Date();
       }
 
       if (isNaN(messageTime.getTime())) {
-        return '';
+        messageTime = new Date();
       }
 
       return messageTime.toLocaleTimeString('en-US', {
@@ -393,38 +403,84 @@ function ChatRoom({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
+    setSelectedMessageId(message.id);
+    const isOwnMessage = message.sender_id === user?.uid;
+    const canCopy = !!message.content;
+    const buttons: any[] = [
+      ...(canCopy
+        ? [{
+            text: 'Copy',
+            onPress: () => {
+              Clipboard.setString(message.content);
+              setSelectedMessageId(null);
+            },
+          }]
+        : []),
+      {
+        text: 'Reply',
+        onPress: () => {
+          setReplyingTo(message);
+          setSelectedMessageId(null);
+        },
+      },
+      ...(onDeleteMessageForMe
+        ? [{
+            text: 'Delete for me',
+            style: 'destructive',
+            onPress: () => {
+              setSelectedMessageId(null);
+              Promise.resolve(onDeleteMessageForMe(message)).catch(() => {});
+            },
+          }]
+        : []),
+      ...(isOwnMessage && onDeleteMessageForEveryone
+        ? [{
+            text: 'Delete for everyone',
+            style: 'destructive',
+            onPress: () => {
+              setSelectedMessageId(null);
+              Promise.resolve(onDeleteMessageForEveryone(message)).catch(() => {});
+            },
+          }]
+        : []),
+      {
+        text: 'Cancel',
+        style: 'cancel',
+        onPress: () => setSelectedMessageId(null),
+      },
+    ];
+
     Alert.alert(
       'Message Options',
       'Choose an action',
-      [
-        { text: 'Copy', onPress: () => Clipboard.setString(message.content) },
-        { text: 'Reply', onPress: () => setReplyingTo(message) },
-        { text: 'Cancel', style: 'cancel' },
-      ]
+      buttons,
+      {
+        cancelable: true,
+        onDismiss: () => setSelectedMessageId(null),
+      }
     );
-  }, []);
+  }, [onDeleteMessageForEveryone, onDeleteMessageForMe, user?.uid]);
 
   const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
     const isOwnMessage = item.sender_id === user?.uid;
     const dateSeparator = getDateSeparator(listMessages, index);
     const isConsecutive = isConsecutiveFromSameSender(index);
     const shouldShowAvatar = !isOwnMessage && !isConsecutive;
+    const isSelected = selectedMessageId === item.id;
 
     return (
       <>
-        {dateSeparator && (
-          <View style={styles.dateSeparatorWrap}>
-            <DateSeparator dateText={dateSeparator} />
-          </View>
-        )}
-
         <TouchableOpacity
           style={[
             styles.messageContainer,
             isOwnMessage ? styles.ownMessage : styles.otherMessage,
             isConsecutive && styles.consecutiveMessage,
+            isSelected && styles.selectedMessageContainer,
           ]}
           onLongPress={() => handleMessageLongPress(item)}
+          onPress={() => {
+            if (selectedMessageId) setSelectedMessageId(null);
+          }}
           delayLongPress={500}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           activeOpacity={0.9}
@@ -469,18 +525,24 @@ function ChatRoom({
             />
           </View>
         </TouchableOpacity>
+
+        {dateSeparator && (
+          <View style={styles.dateSeparatorWrap}>
+            <DateSeparator dateText={dateSeparator} />
+          </View>
+        )}
       </>
     );
   }, [
     listMessages,
     user?.uid,
     otherUser,
-    formatMessageTime,
     getMessageStatusIcon,
     getDateSeparator,
     isConsecutiveFromSameSender,
     handleRetry,
     handleMessageLongPress,
+    selectedMessageId,
   ]);
 
   const keyExtractor = useCallback((item: Message) => item.id, []);
@@ -824,6 +886,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginBottom: 4,
     alignItems: 'flex-end',
     paddingHorizontal: 16,
+    borderRadius: 14,
+  },
+  selectedMessageContainer: {
+    backgroundColor: theme.app.overlayLight,
   },
   consecutiveMessage: {
     marginTop: 2,

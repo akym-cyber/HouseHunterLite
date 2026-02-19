@@ -9,7 +9,7 @@ import AudioPlayer from './AudioPlayer';
 interface ChatBubbleProps {
   message: Message;
   isOwnMessage: boolean;
-  formatMessageTime: (timestamp: string) => string;
+  formatMessageTime: (timestamp: any) => string;
   getMessageStatusIcon: (status?: string) => string | null;
   isSending?: boolean;
   onRetry?: (messageId: string) => void;
@@ -35,6 +35,7 @@ const ChatBubble = React.memo(({
 
   const isDeletedForEveryone = !!message.deleted_for_everyone;
   const displayContent = isDeletedForEveryone ? 'This message was deleted' : message.content;
+  const messageTimestamp = message.created_at || (message as any).updated_at || Date.now();
   const smartWrapText = (text: string) => {
     const lower = text.toLowerCase();
     const needsWrapping = () => {
@@ -171,7 +172,7 @@ const ChatBubble = React.memo(({
               isOwnMessage={isOwnMessage}
               uploadStatus={message.upload_status}
               uploadProgress={message.upload_progress}
-              sentTime={formatMessageTime(message.created_at)}
+              sentTime={formatMessageTime(messageTimestamp)}
               showDebug={false}
               format={audioFormat}
               mimeType={audioMimeType}
@@ -196,7 +197,7 @@ const ChatBubble = React.memo(({
                 styles.time,
                 isOwnMessage ? styles.ownTime : styles.otherTime
               ]}>
-                {formatMessageTime(message.created_at)}
+                {formatMessageTime(messageTimestamp)}
               </Text>
 
               {isOwnMessage && !isDeletedForEveryone && statusDisplay.hasRetry ? (
@@ -222,6 +223,12 @@ const ChatBubble = React.memo(({
 }, (prevProps, nextProps) => {
   return (
     prevProps.message.id === nextProps.message.id &&
+    prevProps.message.created_at === nextProps.message.created_at &&
+    prevProps.message.status === nextProps.message.status &&
+    prevProps.message.upload_status === nextProps.message.upload_status &&
+    prevProps.message.upload_progress === nextProps.message.upload_progress &&
+    prevProps.message.deleted_for_everyone === nextProps.message.deleted_for_everyone &&
+    prevProps.message.content === nextProps.message.content &&
     prevProps.isOwnMessage === nextProps.isOwnMessage &&
     prevProps.isSending === nextProps.isSending
   );
