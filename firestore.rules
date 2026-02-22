@@ -11,12 +11,19 @@ service cloud.firestore {
       return request.auth.uid == userId;
     }
 
+    function isConversationParticipantByData(data) {
+      return (
+        (('participantIds' in data) && data.participantIds is list && request.auth.uid in data.participantIds)
+        || (('participants' in data) && data.participants is list && request.auth.uid in data.participants)
+        || (('participant1_id' in data) && data.participant1_id == request.auth.uid)
+        || (('participant2_id' in data) && data.participant2_id == request.auth.uid)
+      );
+    }
+
     function isConversationParticipant(conversationId) {
-      return request.auth.uid in get(
-        /databases/$(database)/documents/conversations/$(conversationId)
-      ).data.participants
-      || get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1_id == request.auth.uid
-      || get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2_id == request.auth.uid;
+      return isConversationParticipantByData(
+        get(/databases/$(database)/documents/conversations/$(conversationId)).data
+      );
     }
 
     // ---------- Application validation ----------
@@ -271,26 +278,11 @@ service cloud.firestore {
 
     // Conversations
     match /conversations/{conversationId} {
-      allow read: if isSignedIn()
-        && (
-          request.auth.uid in resource.data.participants
-          || resource.data.participant1_id == request.auth.uid
-          || resource.data.participant2_id == request.auth.uid
-        );
+      allow read: if isSignedIn() && isConversationParticipantByData(resource.data);
 
-      allow create: if isSignedIn()
-        && (
-          request.auth.uid in request.resource.data.participants
-          || request.resource.data.participant1_id == request.auth.uid
-          || request.resource.data.participant2_id == request.auth.uid
-        );
+      allow create: if isSignedIn() && isConversationParticipantByData(request.resource.data);
 
-      allow update, delete: if isSignedIn()
-        && (
-          request.auth.uid in resource.data.participants
-          || resource.data.participant1_id == request.auth.uid
-          || resource.data.participant2_id == request.auth.uid
-        );
+      allow update, delete: if isSignedIn() && isConversationParticipantByData(resource.data);
     }
 
     // Messages
@@ -329,6 +321,61 @@ service cloud.firestore {
         );
 
       allow delete: if isSignedIn() && isConversationParticipant(conversationId);
+    }
+
+    // Legacy root messages collection support
+    match /messages/{messageId} {
+      allow read: if isSignedIn()
+        && (
+          (
+            ('conversation_id' in resource.data)
+            && resource.data.conversation_id is string
+            && isConversationParticipant(resource.data.conversation_id)
+          )
+          || (
+            ('conversationId' in resource.data)
+            && resource.data.conversationId is string
+            && isConversationParticipant(resource.data.conversationId)
+          )
+        );
+
+      allow create: if isSignedIn()
+        && (
+          (
+            ('conversation_id' in request.resource.data)
+            && request.resource.data.conversation_id is string
+            && isConversationParticipant(request.resource.data.conversation_id)
+          )
+          || (
+            ('conversationId' in request.resource.data)
+            && request.resource.data.conversationId is string
+            && isConversationParticipant(request.resource.data.conversationId)
+          )
+        )
+        && (
+          (
+            ('sender_id' in request.resource.data)
+            && request.resource.data.sender_id == request.auth.uid
+          )
+          || (
+            ('senderId' in request.resource.data)
+            && request.resource.data.senderId == request.auth.uid
+          )
+        );
+
+      allow update, delete: if isSignedIn()
+        && (
+          (
+            ('conversation_id' in resource.data)
+            && resource.data.conversation_id is string
+            && isConversationParticipant(resource.data.conversation_id)
+          )
+          || (
+            ('conversationId' in resource.data)
+            && resource.data.conversationId is string
+            && isConversationParticipant(resource.data.conversationId)
+          )
+        );
     }
 
     // Inquiries

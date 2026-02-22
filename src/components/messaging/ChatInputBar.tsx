@@ -31,10 +31,10 @@ import Reanimated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useTheme } from '../../theme/useTheme';
 import { Message, MessageMedia } from '../../types/database';
+import { buildVoiceWaveform } from './useVoiceRecording';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const LIVE_WAVE_BAR_COUNT = 16;
-const VOICE_WAVE_POINT_COUNT = 50;
 const MAX_SLIDE_DISTANCE = 120;
 const SLIDE_CANCEL_THRESHOLD = -64;
 const DELETE_ABSORB_DURATION_MS = 200;
@@ -89,15 +89,6 @@ const withRecordingPrepareLock = async <T,>(task: () => Promise<T>): Promise<T> 
   }
 };
 
-const percent = (values: number[], ratio: number): number => {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.floor((sorted.length - 1) * ratio))
-  );
-  return sorted[index];
-};
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
 
@@ -202,6 +193,23 @@ function ChatInputBar({
     const seconds = (recordingDuration % 60).toString().padStart(2, '0');
     return `${minutes}:${seconds}`;
   }, [recordingDuration]);
+
+  const liveWaveBars = useMemo(
+    () =>
+      liveWaveform.map((level, index, allLevels) => {
+        const prev = allLevels[index - 1] ?? level;
+        const next = allLevels[index + 1] ?? level;
+        const smoothedLevel = clampNumber((prev + level * 2 + next) / 4, 0, 1);
+        const width = 2.4 + smoothedLevel * 1.2;
+        return {
+          height: 4 + smoothedLevel * 36,
+          opacity: 0.32 + smoothedLevel * 0.68,
+          width,
+          borderRadius: width / 2,
+        };
+      }),
+    [liveWaveform]
+  );
 
   const clearRecordingTimer = useCallback(() => {
     if (recordingTimerRef.current) {
@@ -309,72 +317,12 @@ function ChatInputBar({
 
   const normalizeMetering = useCallback((metering?: number): number => {
     if (typeof metering !== 'number') {
-      return 0.12;
+      return 0;
     }
     const clampedDb = Math.max(METER_MIN_DB, Math.min(METER_MAX_DB, metering));
     const raw = (clampedDb - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
-    const boosted = Math.pow(raw, 0.7);
-    return Math.max(0.08, Math.min(1, boosted));
-  }, []);
-
-  const buildVoiceWaveform = useCallback((samples: number[]): number[] => {
-    if (samples.length === 0) {
-      return Array.from({ length: VOICE_WAVE_POINT_COUNT }, (_, index) =>
-        18 + Math.round((Math.sin(index * 0.45) + 1) * 7)
-      );
-    }
-
-    const clamped = samples.map((value) => clampNumber(value, 2, 100));
-    const target = VOICE_WAVE_POINT_COUNT;
-
-    let baseSeries: number[] = [];
-    if (clamped.length < target) {
-      baseSeries = Array.from({ length: target }, (_, index) => {
-        const position = (index / (target - 1)) * (clamped.length - 1);
-        const left = Math.floor(position);
-        const right = Math.min(clamped.length - 1, Math.ceil(position));
-        const factor = position - left;
-        return clamped[left] * (1 - factor) + clamped[right] * factor;
-      });
-    } else {
-      const bucketSize = clamped.length / target;
-      baseSeries = Array.from({ length: target }, (_, index) => {
-        const start = Math.floor(index * bucketSize);
-        const end = Math.max(start + 1, Math.floor((index + 1) * bucketSize));
-        const bucket = clamped.slice(start, end);
-        if (bucket.length === 0) {
-          return clamped[Math.min(clamped.length - 1, start)] ?? 0;
-        }
-        const peak = bucket.reduce((max, value) => Math.max(max, value), 0);
-        const avg = bucket.reduce((sum, value) => sum + value, 0) / bucket.length;
-        return peak * 0.72 + avg * 0.28;
-      });
-    }
-
-    const envelope: number[] = [];
-    let previous = baseSeries[0] ?? 0;
-    for (const value of baseSeries) {
-      const factor = value > previous ? 0.42 : 0.2;
-      previous = previous + (value - previous) * factor;
-      envelope.push(previous);
-    }
-
-    const smoothed = envelope.map((value, index) => {
-      const prev = envelope[index - 1] ?? value;
-      const next = envelope[index + 1] ?? value;
-      return prev * 0.2 + value * 0.6 + next * 0.2;
-    });
-
-    const low = percent(smoothed, 0.1);
-    const high = percent(smoothed, 0.95);
-    const range = Math.max(10, high - low);
-
-    return smoothed.map((value) => {
-      const normalized = clampNumber((value - low) / range, 0, 1);
-      const shaped = Math.pow(normalized, 0.82);
-      const height = 13 + shaped * 78;
-      return Math.round(clampNumber(height, 10, 94));
-    });
+    const shaped = Math.pow(raw, 0.9);
+    return clampNumber(shaped, 0, 1);
   }, []);
 
   const stopAndUnloadSafely = useCallback(async (recording: any) => {
@@ -826,7 +774,7 @@ function ChatInputBar({
       resetRecordingState();
       void prepareRecorderInBackground();
     }
-  }, [buildVoiceWaveform, onSendVoice, prepareRecorderInBackground, resetRecordingState]);
+  }, [onSendVoice, prepareRecorderInBackground, resetRecordingState]);
 
   // Voice recording
   const startRecordingInBackground = useCallback(async () => {
@@ -1176,14 +1124,16 @@ function ChatInputBar({
           <View style={styles.recordingInlineOverlay} pointerEvents="none">
             <View style={styles.recordingInlineContent}>
               <Reanimated.View style={[styles.recordingWaveContainer, recordingWaveAnimatedStyle]}>
-                {liveWaveform.map((level, barIndex) => (
+                {liveWaveBars.map((bar, barIndex) => (
                   <View
                     key={`record-wave-${barIndex}`}
                     style={[
                       styles.recordingWaveBar,
                       {
-                        height: 5 + level * 18,
-                        opacity: 0.55 + level * 0.45,
+                        height: bar.height,
+                        opacity: bar.opacity,
+                        width: bar.width,
+                        borderRadius: bar.borderRadius,
                       },
                     ]}
                   />
