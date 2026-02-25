@@ -66,6 +66,51 @@ const TALKING_ABOUT_STOP_WORDS = new Set([
   'in', 'is', 'it', 'its', 'my', 'of', 'on', 'or', 'our', 'that', 'the', 'this',
   'to', 'was', 'we', 'were', 'with', 'you', 'your', 'about',
 ]);
+const PROPERTY_STATUS_HOT_WINDOW_MS = 10 * 60 * 1000;
+const ASKING_KEYWORDS = [
+  'is it available',
+  'is this available',
+  'still available',
+  'available',
+  'can i view',
+  'can we view',
+  'view this',
+  'schedule a viewing',
+  'book a viewing',
+  'tour',
+  'visit',
+];
+const AVAILABLE_KEYWORDS = [
+  'yes',
+  'yess',
+  'available',
+  'still available',
+  'it is available',
+  'its available',
+  'currently available',
+  'vacant',
+  'you can view',
+  'come view',
+];
+const RENTED_KEYWORDS = [
+  'not available',
+  'unavailable',
+  'already rented',
+  'rented',
+  'sold',
+  'taken',
+  'occupied',
+  'no longer available',
+];
+const VIEW_SCHEDULED_KEYWORDS = [
+  'view scheduled',
+  'viewing scheduled',
+  'tour booked',
+  'booked viewing',
+  'appointment confirmed',
+  'confirmed viewing',
+  'see you at',
+];
 
 const normalizeMentionText = (value: string): string =>
   value
@@ -89,6 +134,24 @@ const timestampToMs = (timestamp: any): number => {
     return timestamp.toMillis();
   }
   return 0;
+};
+
+const containsKeyword = (source: string, keyword: string): boolean => {
+  if (!keyword) return false;
+  if (keyword.includes(' ')) return source.includes(keyword);
+  return ` ${source} `.includes(` ${keyword} `);
+};
+
+const includesAnyKeyword = (source: string, keywords: string[]): boolean =>
+  keywords.some((keyword) => containsKeyword(source, keyword));
+
+const formatClockLabel = (timestampMs: number): string => {
+  if (!timestampMs) return '';
+  try {
+    return new Date(timestampMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (_error) {
+    return '';
+  }
 };
 
 const getPropertyThumbnailUri = (propertyData?: Property | null): string | undefined => {
@@ -156,43 +219,84 @@ function ChatRoom({
   }, [property, propertyReferences]);
 
   const propertyContextItems = useMemo(() => {
-    const map = new Map<string, { id: string; label: string; thumbnailUri?: string }>();
+    type ContextProperty = {
+      id: string;
+      label: string;
+      details: string;
+      thumbnailUri?: string;
+    };
+
+    const map = new Map<string, ContextProperty>();
+
+    const formatType = (propertyType?: string) =>
+      propertyType
+        ? `${propertyType.charAt(0).toUpperCase()}${propertyType.slice(1)}`
+        : '';
+
+    const hasBedroomHint = (normalizedLabel: string, bedrooms?: number) => {
+      if (!bedrooms || bedrooms <= 0) return false;
+      return (
+        normalizedLabel.includes(`${bedrooms} bed`)
+        || normalizedLabel.includes(`${bedrooms}bed`)
+        || normalizedLabel.includes(`${bedrooms} bedroom`)
+        || normalizedLabel.includes(`${bedrooms}bedroom`)
+        || normalizedLabel.includes(`${bedrooms}br`)
+      );
+    };
+
+    const buildContextProperty = (propertyId: string, propertyData?: Property | null): ContextProperty => {
+      const rawLabel =
+        propertyData?.title?.trim()
+        || propertyData?.addressLine1?.trim()
+        || `Property ${propertyId.slice(0, 6)}`;
+
+      const compactLabel = rawLabel
+        .replace(/\b(\w+)(\s+\1\b)+/gi, '$1')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const normalizedLabel = normalizeMentionText(compactLabel);
+      const bedroomCount = typeof propertyData?.bedrooms === 'number' ? propertyData.bedrooms : 0;
+      const bedroomLabel = bedroomCount > 0 ? `${bedroomCount}BR` : '';
+      const typeLabel = formatType(propertyData?.propertyType);
+
+      const detailParts: string[] = [];
+      if (bedroomLabel && !hasBedroomHint(normalizedLabel, bedroomCount)) {
+        detailParts.push(bedroomLabel);
+      }
+      if (typeLabel && !normalizedLabel.includes(normalizeMentionText(typeLabel))) {
+        detailParts.push(typeLabel);
+      }
+      if (detailParts.length === 0 && propertyData?.city?.trim()) {
+        detailParts.push(propertyData.city.trim());
+      }
+
+      return {
+        id: propertyId,
+        label: compactLabel,
+        details: detailParts.join(' | '),
+        thumbnailUri: getPropertyThumbnailUri(propertyData),
+      };
+    };
 
     propertyReferences.forEach((item) => {
       if (!item?.id) return;
-      const label = item.title?.trim()
-        || item.addressLine1?.trim()
-        || `Property ${item.id.slice(0, 6)}`;
-      map.set(item.id, {
-        id: item.id,
-        label,
-        thumbnailUri: getPropertyThumbnailUri(item),
-      });
+      map.set(item.id, buildContextProperty(item.id, item));
     });
 
     if (property?.id && !map.has(property.id)) {
-      const label = property.title?.trim()
-        || property.addressLine1?.trim()
-        || `Property ${property.id.slice(0, 6)}`;
-      map.set(property.id, {
-        id: property.id,
-        label,
-        thumbnailUri: getPropertyThumbnailUri(property),
-      });
+      map.set(property.id, buildContextProperty(property.id, property));
     }
 
     const legacyConversationPropertyId =
       (conversation as any).property_id || (conversation as any).propertyId;
-    if (typeof legacyConversationPropertyId === 'string' && legacyConversationPropertyId && !map.has(legacyConversationPropertyId)) {
+    if (
+      typeof legacyConversationPropertyId === 'string'
+      && legacyConversationPropertyId
+      && !map.has(legacyConversationPropertyId)
+    ) {
       const legacyProperty = propertyById.get(legacyConversationPropertyId);
-      map.set(legacyConversationPropertyId, {
-        id: legacyConversationPropertyId,
-        label:
-          legacyProperty?.title?.trim()
-          || legacyProperty?.addressLine1?.trim()
-          || `Property ${legacyConversationPropertyId.slice(0, 6)}`,
-        thumbnailUri: getPropertyThumbnailUri(legacyProperty),
-      });
+      map.set(legacyConversationPropertyId, buildContextProperty(legacyConversationPropertyId, legacyProperty));
     }
 
     return Array.from(map.values());
@@ -246,21 +350,25 @@ function ChatRoom({
     return propertyContextItems
       .map((item) => {
         const keywords = buildPropertyKeywords(item.id, item.label);
-        let lastMentionAtMs = 0;
+        const mentionTimes: number[] = [];
+
+        const pushMentionTime = (rawTimestamp: any) => {
+          const timestampMs = timestampToMs(rawTimestamp);
+          if (timestampMs > 0) {
+            mentionTimes.push(timestampMs);
+          }
+        };
 
         messages.forEach((message) => {
           if ((message as any).deleted_for_everyone) return;
 
           if ((message as any).property_offer_id && (message as any).property_offer_id === item.id) {
-            const offerTimestampMs = timestampToMs(
+            pushMentionTime(
               (message as any).created_at
               ?? (message as any).createdAt
               ?? (message as any).updated_at
               ?? (message as any).updatedAt
             );
-            if (offerTimestampMs > lastMentionAtMs) {
-              lastMentionAtMs = offerTimestampMs;
-            }
           }
 
           if (typeof message.content !== 'string' || !message.content.trim()) return;
@@ -271,27 +379,182 @@ function ChatRoom({
           const isMentioned = keywords.some((keyword) => paddedContains(normalizedContent, keyword));
           if (!isMentioned) return;
 
-          const messageTimestampMs = timestampToMs(
+          pushMentionTime(
             (message as any).created_at
             ?? (message as any).createdAt
             ?? (message as any).updated_at
             ?? (message as any).updatedAt
           );
-          if (messageTimestampMs > lastMentionAtMs) {
-            lastMentionAtMs = messageTimestampMs;
-          }
         });
+
+        const mentionTimesMs = Array.from(new Set(mentionTimes)).sort((a, b) => b - a);
+        const lastMentionAtMs = mentionTimesMs[0] || 0;
 
         return {
           id: item.id,
           label: item.label,
+          details: item.details,
           thumbnailUri: item.thumbnailUri,
-          keywords,
+          mentionTimesMs,
           lastMentionAtMs,
         };
       })
       .sort((a, b) => (b.lastMentionAtMs - a.lastMentionAtMs) || a.label.localeCompare(b.label));
   }, [buildPropertyKeywords, messages, propertyContextItems]);
+
+  const propertyStatusById = useMemo(() => {
+    type StatusKind = 'neutral' | 'pending' | 'available' | 'rented' | 'viewing';
+    type StatusMeta = {
+      kind: StatusKind;
+      iconName: keyof typeof Ionicons.glyphMap;
+      iconColor: string;
+      statusText?: string;
+      statusAtMs: number;
+      isHot: boolean;
+    };
+
+    const map = new Map<string, StatusMeta>();
+    const now = Date.now();
+
+    const fallbackOwnerId = (conversation as any).ownerId;
+
+    propertyContextItems.forEach((item) => {
+      const propertyData = propertyById.get(item.id);
+      const ownerId =
+        propertyData?.ownerId
+        || fallbackOwnerId
+        || (otherUser?.id && otherUser.id !== user?.uid ? otherUser.id : undefined);
+
+      const keywords = buildPropertyKeywords(item.id, item.label);
+      const hasSinglePropertyContext = propertyContextItems.length === 1;
+
+      let latestAskAtMs = 0;
+      let latestOwnerReplyAtMs = 0;
+      let latestEvent:
+        | {
+            kind: Exclude<StatusKind, 'neutral' | 'pending'>;
+            atMs: number;
+          }
+        | null = null;
+
+      messages.forEach((message) => {
+        if ((message as any).deleted_for_everyone) return;
+
+        const senderId =
+          (message as any).sender_id
+          || (message as any).senderId
+          || '';
+
+        const atMs = timestampToMs(
+          (message as any).created_at
+          ?? (message as any).createdAt
+          ?? (message as any).updated_at
+          ?? (message as any).updatedAt
+        );
+        if (!atMs) return;
+
+        const normalizedContent = normalizeMentionText(message.content || '');
+        const propertyOfferMatch = (message as any).property_offer_id === item.id;
+        const propertyMentioned = normalizedContent
+          ? keywords.some((keyword) => containsKeyword(normalizedContent, keyword))
+          : false;
+
+        const isPropertyRelevant = propertyOfferMatch || propertyMentioned || (hasSinglePropertyContext && !!normalizedContent);
+        if (!isPropertyRelevant) return;
+
+        const isOwnerMessage = ownerId ? senderId === ownerId : senderId === otherUser?.id;
+        if (isOwnerMessage) {
+          latestOwnerReplyAtMs = Math.max(latestOwnerReplyAtMs, atMs);
+          if (!normalizedContent) return;
+
+          let kind: Exclude<StatusKind, 'neutral' | 'pending'> | null = null;
+          if (includesAnyKeyword(normalizedContent, RENTED_KEYWORDS)) {
+            kind = 'rented';
+          } else if (includesAnyKeyword(normalizedContent, VIEW_SCHEDULED_KEYWORDS)) {
+            kind = 'viewing';
+          } else if (includesAnyKeyword(normalizedContent, AVAILABLE_KEYWORDS)) {
+            kind = 'available';
+          }
+
+          if (kind && (!latestEvent || atMs >= latestEvent.atMs)) {
+            latestEvent = { kind, atMs };
+          }
+          return;
+        }
+
+        if (!normalizedContent) return;
+        if (includesAnyKeyword(normalizedContent, ASKING_KEYWORDS)) {
+          latestAskAtMs = Math.max(latestAskAtMs, atMs);
+        }
+      });
+
+      let kind: StatusKind = 'neutral';
+      let statusAtMs = 0;
+
+      if (latestAskAtMs > 0 && latestAskAtMs > latestOwnerReplyAtMs) {
+        kind = 'pending';
+        statusAtMs = latestAskAtMs;
+      } else if (latestEvent) {
+        kind = latestEvent.kind;
+        statusAtMs = latestEvent.atMs;
+      } else if (propertyData?.status === 'rented' || propertyData?.status === 'unavailable') {
+        kind = 'rented';
+      }
+
+      const mentionMeta = talkingAboutItems.find((talkingItem) => talkingItem.id === item.id);
+      const lastMentionAtMs = mentionMeta?.lastMentionAtMs || 0;
+      const isHot =
+        liveMentionPropertyIds.includes(item.id)
+        || (statusAtMs > 0 && now - statusAtMs <= PROPERTY_STATUS_HOT_WINDOW_MS)
+        || (lastMentionAtMs > 0 && now - lastMentionAtMs <= PROPERTY_STATUS_HOT_WINDOW_MS);
+
+      const statusTimeLabel = formatClockLabel(statusAtMs);
+
+      let iconName: keyof typeof Ionicons.glyphMap = 'home-outline';
+      let iconColor = theme.colors.onPrimary;
+      let statusText: string | undefined;
+
+      if (kind === 'available') {
+        iconName = 'checkmark-circle';
+        iconColor = '#34D399';
+        statusText = statusTimeLabel ? `Available now | ${statusTimeLabel}` : 'Available now!';
+      } else if (kind === 'pending') {
+        iconName = 'hourglass-outline';
+        iconColor = '#FBBF24';
+        statusText = statusTimeLabel ? `Awaiting reply | ${statusTimeLabel}` : 'Awaiting reply';
+      } else if (kind === 'rented') {
+        iconName = 'close-circle';
+        iconColor = '#F87171';
+        statusText = 'No longer available';
+      } else if (kind === 'viewing') {
+        iconName = 'eye';
+        iconColor = '#93C5FD';
+        statusText = statusTimeLabel ? `Tour booked | ${statusTimeLabel}` : 'Tour booked';
+      }
+
+      map.set(item.id, {
+        kind,
+        iconName,
+        iconColor,
+        statusText,
+        statusAtMs,
+        isHot,
+      });
+    });
+
+    return map;
+  }, [
+    buildPropertyKeywords,
+    conversation,
+    liveMentionPropertyIds,
+    messages,
+    otherUser?.id,
+    propertyById,
+    propertyContextItems,
+    talkingAboutItems,
+    theme.colors.onPrimary,
+    user?.uid,
+  ]);
 
   // Video call pulse animation
   const videoCallPulseAnim = useRef(new Animated.Value(0)).current;
@@ -979,46 +1242,6 @@ function ChatRoom({
           </View>
         </View>
 
-        {propertyContextItems.length > 0 && (
-          <View style={styles.propertyContextWrap}>
-            <Text style={styles.propertyContextLabel}>REGARDING</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.propertyContextList}
-            >
-              {propertyContextItems.map((item) => (
-                <TouchableOpacity
-                  key={`header-property-${item.id}`}
-                  style={styles.propertyContextChip}
-                  onPress={() => onPropertyPress?.(item.id)}
-                  onLongPress={() => {
-                    if (onSendPropertyOffer) {
-                      void onSendPropertyOffer(item.id);
-                    }
-                  }}
-                  delayLongPress={300}
-                  activeOpacity={0.85}
-                >
-                  {item.thumbnailUri ? (
-                    <Avatar.Image
-                      size={18}
-                      source={{ uri: item.thumbnailUri }}
-                      style={styles.propertyContextThumb}
-                    />
-                  ) : (
-                    <View style={styles.propertyContextThumbFallback}>
-                      <Ionicons name="home-outline" size={10} color={theme.colors.onPrimary} />
-                    </View>
-                  )}
-                  <Text numberOfLines={1} style={styles.propertyContextChipText}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
       </View>
     );
   }, [
@@ -1038,14 +1261,6 @@ function ChatRoom({
     styles.headerInfo,
     styles.headerName,
     styles.headerStatus,
-    styles.propertyContextChip,
-    styles.propertyContextChipText,
-    styles.propertyContextLabel,
-    styles.propertyContextList,
-    styles.propertyContextThumb,
-    styles.propertyContextThumbFallback,
-    styles.propertyContextWrap,
-    propertyContextItems,
     theme.colors.onPrimary,
     theme.colors.primary,
     videoCallPulseAnim,
@@ -1084,8 +1299,10 @@ function ChatRoom({
           >
             {talkingAboutItems.map((item) => {
               const isLive = liveMentionPropertyIds.includes(item.id);
-              const mentionText = item.lastMentionAtMs > 0
-                ? `Mentioned ${formatMessageClock(item.lastMentionAtMs)}`
+              const statusMeta = propertyStatusById.get(item.id);
+              const isHot = !!statusMeta?.isHot;
+              const mentionText = item.mentionTimesMs.length > 0
+                ? item.mentionTimesMs.map((timeMs) => formatMessageClock(timeMs)).join(', ')
                 : 'No mention yet';
 
               return (
@@ -1121,14 +1338,35 @@ function ChatRoom({
                       <Text style={styles.talkingAboutChipName} numberOfLines={1}>
                         {item.label}
                       </Text>
-                      <Text style={styles.talkingAboutChipMeta} numberOfLines={1}>
-                        {mentionText}
-                      </Text>
+                      <View style={styles.talkingAboutMentionRow}>
+                        <Ionicons
+                          name="chatbubble-ellipses-outline"
+                          size={11}
+                          color={theme.colors.onSurfaceVariant}
+                          style={styles.talkingAboutMentionIcon}
+                        />
+                        <Text style={styles.talkingAboutChipMeta} numberOfLines={1}>
+                          {mentionText}
+                        </Text>
+                      </View>
+                      {!!statusMeta?.statusText && (
+                        <View style={styles.talkingAboutStatusRow}>
+                          <Ionicons
+                            name={statusMeta.iconName}
+                            size={11}
+                            color={statusMeta.iconColor}
+                            style={styles.talkingAboutStatusIcon}
+                          />
+                          <Text style={styles.talkingAboutStatusText} numberOfLines={1}>
+                            {statusMeta.statusText}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
-                  {isLive && (
+                  {(isLive || isHot) && (
                     <View style={styles.talkingAboutLiveBadge}>
-                      <Text style={styles.talkingAboutLiveText}>LIVE</Text>
+                      <Text style={styles.talkingAboutLiveText}>{isLive ? 'LIVE' : 'HOT'}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -1145,6 +1383,7 @@ function ChatRoom({
     onPropertyPress,
     onSendPropertyOffer,
     propertyContextItems.length,
+    propertyStatusById,
     styles.talkingAboutChip,
     styles.talkingAboutChipLive,
     styles.talkingAboutChipMeta,
@@ -1158,7 +1397,12 @@ function ChatRoom({
     styles.talkingAboutList,
     styles.talkingAboutLiveBadge,
     styles.talkingAboutLiveText,
+    styles.talkingAboutMentionIcon,
+    styles.talkingAboutMentionRow,
     styles.talkingAboutPanel,
+    styles.talkingAboutStatusIcon,
+    styles.talkingAboutStatusRow,
+    styles.talkingAboutStatusText,
     styles.talkingAboutThumb,
     styles.talkingAboutThumbFallback,
     styles.talkingAboutTitle,
@@ -1287,6 +1531,34 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginTop: -8,
     paddingHorizontal: 16,
     paddingBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.22)',
+  },
+  propertyContextHeader: {
+    minHeight: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  propertyContextHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  propertyContextCountBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    marginRight: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  propertyContextCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.onPrimary,
   },
   propertyContextLabel: {
     fontSize: 10,
@@ -1294,18 +1566,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     letterSpacing: 0.9,
     color: theme.colors.onPrimary,
     opacity: 0.8,
-    marginBottom: 4,
+    marginBottom: 0,
   },
   propertyContextList: {
     alignItems: 'center',
     paddingRight: 8,
   },
   propertyContextChip: {
-    maxWidth: 176,
-    height: 28,
-    borderRadius: 14,
-    paddingLeft: 6,
-    paddingRight: 10,
+    maxWidth: 220,
+    minHeight: 46,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     marginRight: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1314,22 +1586,38 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     backgroundColor: 'rgba(255,255,255,0.16)',
   },
   propertyContextThumb: {
-    marginRight: 6,
     backgroundColor: theme.colors.surface,
   },
   propertyContextThumbFallback: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    marginRight: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.22)',
   },
+  propertyContextChipTextWrap: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  propertyContextTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  propertyContextTitleIcon: {
+    marginRight: 4,
+  },
   propertyContextChipText: {
     color: theme.colors.onPrimary,
     fontSize: 12,
-    maxWidth: 136,
+    fontWeight: '600',
+    maxWidth: 164,
+  },
+  propertyContextDetailsText: {
+    color: theme.colors.onPrimary,
+    opacity: 0.82,
+    fontSize: 10,
+    marginTop: 1,
   },
   talkingAboutPanel: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -1399,10 +1687,32 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   talkingAboutChipMeta: {
     fontSize: 10,
     color: theme.colors.onSurfaceVariant,
+    flexShrink: 1,
   },
   talkingAboutChipRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  talkingAboutMentionRow: {
+    marginTop: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  talkingAboutMentionIcon: {
+    marginRight: 4,
+  },
+  talkingAboutStatusRow: {
+    marginTop: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  talkingAboutStatusIcon: {
+    marginRight: 4,
+  },
+  talkingAboutStatusText: {
+    fontSize: 10,
+    color: theme.colors.onSurfaceVariant,
+    flexShrink: 1,
   },
   talkingAboutChipTextWrap: {
     flex: 1,
