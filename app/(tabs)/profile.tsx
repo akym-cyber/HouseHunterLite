@@ -141,7 +141,7 @@ export default function ProfileScreen() {
   };
 
   const handleManageProperties = () => {
-    router.push('/(tabs)/index');
+    router.push('/(tabs)');
   };
 
   const handleScheduleNew = () => {
