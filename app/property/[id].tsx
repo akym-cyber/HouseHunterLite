@@ -43,7 +43,7 @@ export default function PropertyDetailsScreen() {
   const { user } = useAuth();
   const { properties, loading: propertiesLoading, refreshProperties, deleteProperty } = useProperties();
   const { isFavorite, toggleFavorite } = useFavorites();
-  const { findConversationByOwner, createConversation } = useMessages();
+  const { findConversationByOwner, findConversationByProperty, createConversation } = useMessages();
   const { applications } = useApplications('tenant');
   const [fetchedProperty, setFetchedProperty] = useState<Property | null>(null);
   const [fetchByIdError, setFetchByIdError] = useState<string | null>(null);
@@ -60,6 +60,15 @@ export default function PropertyDetailsScreen() {
     [properties, propertyId]
   );
   const property = propertyFromList ?? fetchedProperty;
+  const ownerId = property?.ownerId || (property as any)?.owner_id;
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
   const existingApplication = useMemo(() => {
     if (!user || !property) return null;
     return applications.find(app => app.propertyId === property.id && app.tenantId === user.uid) || null;
@@ -94,40 +103,49 @@ export default function PropertyDetailsScreen() {
 
   const handleContactOwner = async () => {
     if (!user) {
-      Alert.alert('Error', 'Please sign in to contact the owner');
+      showAlert('Error', 'Please sign in to contact the owner');
       return;
     }
 
     if (!property) return;
+    if (!ownerId) {
+      showAlert('Error', 'Property owner information is missing.');
+      return;
+    }
 
     // Check if user is trying to contact themselves
-    if (user.uid === property.ownerId) {
-      Alert.alert('Error', 'You cannot contact yourself');
+    if (user.uid === ownerId) {
+      showAlert('Error', 'You cannot contact yourself');
       return;
     }
 
     try {
-      // First, try to find an existing conversation for this owner
-      const findResult = await findConversationByOwner(property.ownerId, property.ownerId);
+      // First, try to find an existing conversation for this owner.
+      const findResult = await findConversationByOwner(ownerId, ownerId);
 
       if (findResult.success && findResult.data) {
-        // Conversation exists, navigate to it
-        router.push(`/chat/${findResult.data.id}`);
+        router.push({ pathname: '/chat/[id]', params: { id: findResult.data.id } });
         return;
       }
 
-      // No existing conversation, create a new one
-      const createResult = await createConversation(property.id, property.ownerId);
+      // Fallback: find by property + participants for legacy conversations.
+      const propertyFind = await findConversationByProperty(property.id, ownerId);
+      if (propertyFind.success && propertyFind.data) {
+        router.push({ pathname: '/chat/[id]', params: { id: propertyFind.data.id } });
+        return;
+      }
+
+      // No existing conversation, create a new one.
+      const createResult = await createConversation(property.id, ownerId);
 
       if (createResult.success && createResult.data) {
-        // Navigate to the newly created conversation
-        router.push(`/chat/${createResult.data.id}`);
+        router.push({ pathname: '/chat/[id]', params: { id: createResult.data.id } });
       } else {
-        Alert.alert('Error', createResult.error || 'Failed to start conversation');
+        showAlert('Error', createResult.error || 'Failed to start conversation');
       }
     } catch (error) {
       console.error('Error contacting owner:', error);
-      Alert.alert('Error', 'Failed to start conversation. Please try again.');
+      showAlert('Error', 'Failed to start conversation. Please try again.');
     }
   };
 
@@ -146,16 +164,20 @@ export default function PropertyDetailsScreen() {
 
   const handleOpenApply = () => {
     if (!user) {
-      Alert.alert('Error', 'Please sign in to apply');
+      showAlert('Error', 'Please sign in to apply');
       return;
     }
     if (!property) return;
-    if (user.uid === property.ownerId) {
-      Alert.alert('Error', 'You cannot apply to your own property');
+    if (!ownerId) {
+      showAlert('Error', 'Property owner information is missing.');
+      return;
+    }
+    if (user.uid === ownerId) {
+      showAlert('Error', 'You cannot apply to your own property');
       return;
     }
     if (hasApplied) {
-      Alert.alert('Already applied', 'You have already applied for this property.');
+      showAlert('Already applied', 'You have already applied for this property.');
       return;
     }
     setApplyVisible(true);
@@ -167,30 +189,35 @@ export default function PropertyDetailsScreen() {
     try {
       const existing = applications.find(app => app.propertyId === property.id && app.tenantId === user.uid);
       if (existing) {
-        Alert.alert('Already applied', 'You have already applied for this property.');
+        showAlert('Already applied', 'You have already applied for this property.');
         setApplySubmitting(false);
         setApplyVisible(false);
+        return;
+      }
+
+      if (!ownerId) {
+        showAlert('Error', 'Property owner information is missing.');
         return;
       }
 
       const result = await applicationHelpers.createApplication({
         propertyId: property.id,
         tenantId: user.uid,
-        ownerId: property.ownerId,
+        ownerId: ownerId,
         message: applyMessage.trim(),
         status: 'pending',
       });
 
       if (result.error) {
-        Alert.alert('Error', result.error || 'Failed to submit application');
+        showAlert('Error', result.error || 'Failed to submit application');
         return;
       }
 
-      Alert.alert('Application sent', 'Your application has been submitted.');
+      showAlert('Application sent', 'Your application has been submitted.');
       setApplyVisible(false);
       setApplyMessage('');
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to submit application');
+      showAlert('Error', error?.message || 'Failed to submit application');
     } finally {
       setApplySubmitting(false);
     }
@@ -198,7 +225,7 @@ export default function PropertyDetailsScreen() {
 
   const handleToggleFavorite = async () => {
     if (!user) {
-      Alert.alert('Error', 'Please sign in to save favorites');
+      showAlert('Error', 'Please sign in to save favorites');
       return;
     }
 
@@ -394,7 +421,7 @@ export default function PropertyDetailsScreen() {
     );
   }
 
-  const isOwner = user?.uid === property.ownerId;
+  const isOwner = user?.uid === ownerId;
 
   return (
     <View style={styles.container}>

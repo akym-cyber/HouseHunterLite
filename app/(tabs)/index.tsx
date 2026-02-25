@@ -36,14 +36,9 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [imageKey, setImageKey] = useState(0); // For cache busting
 
-  // Debug logging for property ownership issue
-  console.log('OWNER UID:', user?.uid);
-  console.log('FETCHED PROPERTIES:', properties);
-
   // Refresh properties on screen focus - refetch after property creation
   useFocusEffect(
     useCallback(() => {
-      console.log('[Home] Screen focused - refreshing properties');
       refreshProperties();
       // Removed automatic image key increment to prevent excessive reloads
     }, []) // Remove profile dependency to prevent excessive refreshes
@@ -157,15 +152,6 @@ export default function HomeScreen() {
               uri: getImageUrlWithCacheBust(profile.photoURL)
             }}
             style={styles.avatar}
-            onLoadStart={() => {
-              console.log('[Home] Avatar image load started:', profile.photoURL);
-            }}
-            onLoadEnd={() => {
-              console.log('[Home] Avatar image load completed successfully');
-            }}
-            onError={(error) => {
-              console.error('[Home] Avatar image load failed:', error);
-            }}
           />
         ) : (
           <Avatar.Text

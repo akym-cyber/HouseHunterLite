@@ -16,7 +16,6 @@ import {
   Searchbar,
 } from 'react-native-paper';
 import { router } from 'expo-router';
-import { auth } from '../../src/services/firebase/firebaseConfig';
 import { useMessages } from '../../src/hooks/useMessages';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useTheme } from '../../src/theme/useTheme';
@@ -116,78 +115,14 @@ export default function MessagesScreen() {
   const [userProfiles, setUserProfiles] = useState<Record<string, User | null>>({});
   const styles = useMemo(() => createStyles(theme), [theme]);
 
-  // 🔍 COMPREHENSIVE DEBUGGING
-  useEffect(() => {
-    console.log('🔍 ===== MESSAGES SCREEN DEBUG =====');
-    console.log('🔍 User:', user);
-    console.log('🔍 User UID:', user?.uid);
-    console.log('🔍 Loading:', loading);
-    console.log('🔍 Error:', error);
-    console.log('🔍 Conversations COUNT:', conversations?.length);
-    console.log('🔍 Conversations DATA:', conversations);
-    console.log('🔍 Conversations RAW:', JSON.stringify(conversations, null, 2));
-
-    // Check if it's an array
-    console.log('🔍 Is Array?:', Array.isArray(conversations));
-
-    // Check if empty array or null/undefined
-    if (conversations && Array.isArray(conversations)) {
-      console.log('🔍 First conversation:', conversations[0]);
-      console.log('🔍 All IDs:', conversations.map(c => c?.id));
-    }
-
-    console.log('🔍 Unread Count:', unreadCount);
-    console.log('🔍 Is Online:', isOnline);
-    console.log('🔍 ===== END DEBUG =====');
-  }, [conversations, loading, error, user]);
-
-  // 🔍 DEBUG: Check what useAuth() returns
-  useEffect(() => {
-    console.log('🔍 DEBUG - useAuth() user object:', {
-      hasUser: !!user,
-      user: user,
-      userEmail: user?.email,
-      userUid: user?.uid,
-      allKeys: user ? Object.keys(user) : 'no user'
-    });
-
-    // Check if it's actually Firebase auth issue
-    console.log('🔍 Firebase auth currentUser:', auth.currentUser);
-  }, [user]);
-
   // Auth check timeout protection
   useEffect(() => {
     const timer = setTimeout(() => {
       setAuthCheckDone(true);
-      console.log('⏰ Auth check timeout reached');
     }, 3000); // 3 second timeout
 
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    console.log("📱 Messages Screen - User:", user?.uid);
-    console.log("📱 Conversations count:", conversations?.length || 0);
-    console.log("📱 Conversations data:", conversations);
-    console.log("📱 Error:", error);
-    console.log("📱 Loading:", loading);
-    console.log("📱 Search query:", searchQuery);
-  }, [conversations, error, loading, searchQuery]);
-
-  useEffect(() => {
-    const filtered = conversations.filter(conversation => {
-      if (!searchQuery) return true;
-      const queryText = searchQuery.toLowerCase();
-      const otherId = getOtherParticipantId(conversation, user?.uid);
-      const otherUser = otherId ? userProfiles[otherId] : null;
-      const displayName = getDisplayName(otherUser).toLowerCase();
-
-      return conversation.id.toLowerCase().includes(queryText) ||
-             (conversation.property_id && conversation.property_id.toLowerCase().includes(queryText)) ||
-             displayName.includes(queryText);
-    });
-    console.log("📱 Filtered conversations count:", filtered?.length || 0);
-  }, [conversations, searchQuery, user?.uid, userProfiles]);
 
   const mergedConversations = useMemo(() => {
     if (!user?.uid) return conversations;

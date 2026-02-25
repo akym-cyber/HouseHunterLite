@@ -51,6 +51,15 @@ export const useAuth = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const safetyTimeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          console.warn('[useAuth] onAuthStateChanged timeout fallback reached; unlocking UI.');
+        }
+        return false;
+      });
+    }, 5000);
+
     // Listen for auth state changes - no forced logout
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -77,7 +86,10 @@ export const useAuth = () => {
       setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      clearTimeout(safetyTimeout);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -188,22 +200,44 @@ export const useAuth = () => {
         updatedAt: new Date().toISOString(),
       });
       
-      // Also save to the old format for backward compatibility
-      const userResult = await userHelpers.addUser({
-        email: result.user.email,
-        firstName: userData.firstName,
-        lastName: userData.lastName,
-        phone: userData.phone,
-        role: userData.role || 'tenant',
-        shareContactInfo: true,
-        isVerified: false,
-        isActive: true
-      });
-      if (userResult.data) {
+      // Also save to the old format for backward compatibility.
+      // This must never block auth success on mobile-web.
+      try {
+        const userResult = await userHelpers.addUser({
+          email: result.user.email,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          phone: userData.phone,
+          role: userData.role || 'tenant',
+          shareContactInfo: true,
+          isVerified: false,
+          isActive: true
+        });
+
+        if (userResult.data) {
+          setUser({
+            ...result.user,
+            ...userResult.data
+          });
+        } else {
+          setUser({
+            ...result.user,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            role: userData.role || 'tenant'
+          } as AuthUser);
+          if (userResult.error) {
+            console.warn('Legacy user write failed:', userResult.error);
+          }
+        }
+      } catch (legacyWriteError) {
+        console.warn('Legacy user write failed:', legacyWriteError);
         setUser({
           ...result.user,
-          ...userResult.data
-        });
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          role: userData.role || 'tenant'
+        } as AuthUser);
       }
       
       return { success: true, error: null };

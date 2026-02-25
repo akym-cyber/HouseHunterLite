@@ -30,6 +30,28 @@ interface FirestoreResponse<T> {
   error: string | null;
 }
 
+const normalizeParticipantIds = (data: any): string[] => {
+  const fromArray = Array.isArray(data?.participants)
+    ? data.participants.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+  const p1 = typeof data?.participant1_id === 'string' ? data.participant1_id : null;
+  const p2 = typeof data?.participant2_id === 'string' ? data.participant2_id : null;
+  return Array.from(new Set([...fromArray, ...(p1 ? [p1] : []), ...(p2 ? [p2] : [])]));
+};
+
+const conversationHasParticipants = (data: any, participant1Id: string, participant2Id: string): boolean => {
+  const participants = normalizeParticipantIds(data);
+  return participants.includes(participant1Id) && participants.includes(participant2Id);
+};
+
+const conversationHasPropertyReference = (data: any, propertyId: string): boolean => {
+  return (
+    data?.property_id === propertyId ||
+    data?.propertyId === propertyId ||
+    (Array.isArray(data?.propertyReferences) && data.propertyReferences.includes(propertyId))
+  );
+};
+
 // Conversation CRUD Operations
 export const conversationHelpers = {
   // Get conversations by user
@@ -99,33 +121,49 @@ export const conversationHelpers = {
   // Find conversation by property and participants
   async findConversationByPropertyAndParticipants(propertyId: string, participant1Id: string, participant2Id: string): Promise<FirestoreResponse<Conversation | null>> {
     try {
-      console.log('[findConversationByPropertyAndParticipants] Searching for conversation with propertyId:', propertyId, 'participants:', [participant1Id, participant2Id]);
-
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
-      const q = query(
-        conversationsRef,
-        where('property_id', '==', propertyId),
-        where('participants', 'array-contains', participant1Id)
-      );
+      const seen = new Set<string>();
 
-      const querySnapshot = await getDocs(q);
-      console.log('[findConversationByPropertyAndParticipants] Query returned', querySnapshot.size, 'documents');
-
-      // Find conversation that contains both participants
-      for (const doc of querySnapshot.docs) {
-        const data = doc.data();
-        console.log('[findConversationByPropertyAndParticipants] Checking conversation', doc.id, 'participants:', data.participants);
-
-        if (data.participants &&
-            Array.isArray(data.participants) &&
-            data.participants.includes(participant1Id) &&
-            data.participants.includes(participant2Id)) {
-          console.log('[findConversationByPropertyAndParticipants] Found matching conversation:', doc.id);
-          return { data: { id: doc.id, ...data } as Conversation, error: null };
+      const inspectSnapshot = (querySnapshot: any): Conversation | null => {
+        for (const docSnap of querySnapshot.docs) {
+          if (seen.has(docSnap.id)) continue;
+          seen.add(docSnap.id);
+          const data = docSnap.data();
+          if (
+            conversationHasPropertyReference(data, propertyId) &&
+            conversationHasParticipants(data, participant1Id, participant2Id)
+          ) {
+            return { id: docSnap.id, ...data } as Conversation;
+          }
         }
+        return null;
+      };
+
+      // Avoid composite-index-prone queries here; query broad then filter client-side.
+      const participantsSnapshot = await getDocs(
+        query(conversationsRef, where('participants', 'array-contains', participant1Id))
+      );
+      const participantsMatch = inspectSnapshot(participantsSnapshot);
+      if (participantsMatch) {
+        return { data: participantsMatch, error: null };
       }
 
-      console.log('[findConversationByPropertyAndParticipants] No matching conversation found');
+      const legacyP1Snapshot = await getDocs(
+        query(conversationsRef, where('participant1_id', '==', participant1Id))
+      );
+      const legacyP1Match = inspectSnapshot(legacyP1Snapshot);
+      if (legacyP1Match) {
+        return { data: legacyP1Match, error: null };
+      }
+
+      const legacyP2Snapshot = await getDocs(
+        query(conversationsRef, where('participant2_id', '==', participant1Id))
+      );
+      const legacyP2Match = inspectSnapshot(legacyP2Snapshot);
+      if (legacyP2Match) {
+        return { data: legacyP2Match, error: null };
+      }
+
       return { data: null, error: null };
     } catch (error: any) {
       console.error('[findConversationByPropertyAndParticipants] Error finding conversation:', error);
@@ -361,22 +399,60 @@ export const messageHelpers = {
   async findConversationByOwnerAndParticipants(ownerId: string, participant1Id: string, participant2Id: string): Promise<FirestoreResponse<Conversation | null>> {
     try {
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
-      const q = query(
-        conversationsRef,
-        where('ownerId', '==', ownerId),
-        where('participants', 'array-contains', participant1Id)
-      );
+      const seen = new Set<string>();
 
-      const querySnapshot = await getDocs(q);
+      const matchesOwner = (data: any): boolean => {
+        return (
+          data?.ownerId === ownerId ||
+          data?.owner_id === ownerId ||
+          data?.createdBy === ownerId ||
+          data?.participant1_id === ownerId ||
+          data?.participant2_id === ownerId
+        );
+      };
 
-      for (const docSnap of querySnapshot.docs) {
-        const data = docSnap.data();
-        if (data.participants &&
-            Array.isArray(data.participants) &&
-            data.participants.includes(participant1Id) &&
-            data.participants.includes(participant2Id)) {
-          return { data: { id: docSnap.id, ...data } as Conversation, error: null };
+      const inspectSnapshot = (querySnapshot: any): Conversation | null => {
+        for (const docSnap of querySnapshot.docs) {
+          if (seen.has(docSnap.id)) continue;
+          seen.add(docSnap.id);
+          const data = docSnap.data();
+          if (matchesOwner(data) && conversationHasParticipants(data, participant1Id, participant2Id)) {
+            return { id: docSnap.id, ...data } as Conversation;
+          }
         }
+        return null;
+      };
+
+      const ownerSnapshot = await getDocs(
+        query(conversationsRef, where('ownerId', '==', ownerId))
+      );
+      const ownerMatch = inspectSnapshot(ownerSnapshot);
+      if (ownerMatch) {
+        return { data: ownerMatch, error: null };
+      }
+
+      const participantsSnapshot = await getDocs(
+        query(conversationsRef, where('participants', 'array-contains', participant1Id))
+      );
+      const participantsMatch = inspectSnapshot(participantsSnapshot);
+      if (participantsMatch) {
+        return { data: participantsMatch, error: null };
+      }
+
+      const legacyP1Snapshot = await getDocs(
+        query(conversationsRef, where('participant1_id', '==', participant1Id))
+      );
+      const legacyP1Match = inspectSnapshot(legacyP1Snapshot);
+      if (legacyP1Match) {
+        return { data: legacyP1Match, error: null };
+      }
+
+      const legacyP2Snapshot = await getDocs(
+        query(conversationsRef, where('participant2_id', '==', participant1Id))
+      );
+      const legacyP2Match = inspectSnapshot(legacyP2Snapshot);
+      if (legacyP2Match) {
+        return { data: legacyP2Match, error: null };
       }
 
       return { data: null, error: null };

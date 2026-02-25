@@ -3,7 +3,8 @@ import { messageHelpers } from '../services/firebase/messageHelpers';
 import { Message, Conversation, Inquiry, MessageMedia } from '../types/database';
 import { useAuth } from './useAuth';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
-import { db } from '../services/firebase/firebaseConfig';
+import { auth, db } from '../services/firebase/firebaseConfig';
+import NetInfo from '@react-native-community/netinfo';
 
 interface MessagesState {
   conversations: Conversation[];
@@ -21,6 +22,55 @@ interface SendMessageData {
   propertyOfferId?: string;
 }
 
+const toTimestampMs = (value: any): number => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return value.seconds * 1000 + ((value.nanoseconds || 0) / 1000000);
+  }
+  if (typeof value === 'object' && typeof value.toMillis === 'function') {
+    return value.toMillis();
+  }
+  return 0;
+};
+
+const normalizeConversationShape = (docId: string, data: any): Conversation => {
+  const participantsFromArray = Array.isArray(data?.participants)
+    ? data.participants.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+
+  const participant1 = typeof data?.participant1_id === 'string' ? data.participant1_id : undefined;
+  const participant2 = typeof data?.participant2_id === 'string' ? data.participant2_id : undefined;
+
+  const mergedParticipants = Array.from(
+    new Set([
+      ...participantsFromArray,
+      ...(participant1 ? [participant1] : []),
+      ...(participant2 ? [participant2] : []),
+    ])
+  );
+
+  return {
+    id: docId,
+    ...data,
+    participants: mergedParticipants,
+    participant1_id: participant1,
+    participant2_id: participant2,
+    last_message_at:
+      data?.last_message_at ??
+      data?.lastMessageAt ??
+      data?.updatedAt ??
+      data?.created_at ??
+      data?.createdAt ??
+      new Date().toISOString(),
+  } as Conversation;
+};
+
 export const useMessages = () => {
   const { user } = useAuth();
   const [state, setState] = useState<MessagesState>({
@@ -33,78 +83,105 @@ export const useMessages = () => {
   const [isOnline, setIsOnline] = useState(true);
   const deliveryListenersRef = useRef<Map<string, () => void>>(new Map());
 
-  // Add console logs for returns
-  console.log('[useMessages] returning:', {
-    conversationsCount: state.conversations.length,
-    loading: state.loading,
-    error: state.error,
-    unreadCount,
-    isOnline
-  });
-
   // Real-time conversation listener
   useEffect(() => {
     if (!user) {
-      console.log('[useMessages] No user, skipping conversation listener');
+      setState(prev => ({ ...prev, conversations: [], loading: false, error: null }));
       return;
     }
 
-    console.log('[useMessages] Setting up conversation listener for user:', user.uid);
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     const conversationsRef = collection(db, 'conversations');
+    const participantsQuery = query(conversationsRef, where('participants', 'array-contains', user.uid));
+    const participant1Query = query(conversationsRef, where('participant1_id', '==', user.uid));
+    const participant2Query = query(conversationsRef, where('participant2_id', '==', user.uid));
 
-    // Listen for conversations where user is in participants array
-    const q = query(
-      conversationsRef,
-      where('participants', 'array-contains', user.uid),
-      orderBy('last_message_at', 'desc')
-    );
+    let fromParticipants: Conversation[] = [];
+    let fromParticipant1: Conversation[] = [];
+    let fromParticipant2: Conversation[] = [];
+    let failedListeners = 0;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('[useMessages] conversations snapshot received, docs count:', snapshot.docs.length);
-
-      const conversations = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Conversation));
-
-      console.log('[useMessages] conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
-
-      // Validate participants arrays
-      conversations.forEach(conv => {
-        if (!conv.participants || !Array.isArray(conv.participants)) {
-          console.warn('[useMessages] Conversation missing valid participants array:', conv.id, conv.participants);
-        }
+    const emitMergedConversations = () => {
+      const mergedById = new Map<string, Conversation>();
+      [...fromParticipants, ...fromParticipant1, ...fromParticipant2].forEach((conversation) => {
+        mergedById.set(conversation.id, conversation);
       });
 
-      // Sort conversations by last message time
-      conversations.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+      const merged = Array.from(mergedById.values()).sort(
+        (a, b) => toTimestampMs(b.last_message_at) - toTimestampMs(a.last_message_at)
+      );
 
-      console.log('[useMessages] sorted conversations count:', conversations.length);
-
-      // Calculate unread count (conversations < 1 hour old)
-      const unread = conversations.filter(conv =>
-        new Date().getTime() - new Date(conv.last_message_at).getTime() < (1000 * 60 * 60)
-      ).length;
+      const unread = merged.filter((conv) => {
+        const lastMessageAtMs = toTimestampMs(conv.last_message_at);
+        return lastMessageAtMs > 0 && (Date.now() - lastMessageAtMs) < (1000 * 60 * 60);
+      }).length;
 
       setUnreadCount(unread);
       setState(prev => ({
         ...prev,
-        conversations: conversations,
+        conversations: merged,
         loading: false,
         error: null,
       }));
-    }, (error) => {
-      console.error('[useMessages] Real-time conversations error:', error);
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        error: 'Failed to load conversations',
-      }));
-    });
+    };
 
-    return unsubscribe;
+    const logListenerError = (label: string, error: unknown) => {
+      console.error(`[useMessages] Conversation listener error (${label}):`, error);
+      failedListeners += 1;
+      if (failedListeners >= 3) {
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          error: 'Failed to load conversations',
+        }));
+      }
+    };
+
+    const unsubscribeParticipants = onSnapshot(
+      participantsQuery,
+      (snapshot) => {
+        fromParticipants = snapshot.docs.map((docSnap) =>
+          normalizeConversationShape(docSnap.id, docSnap.data())
+        );
+        emitMergedConversations();
+      },
+      (error) => {
+        logListenerError('participants', error);
+      }
+    );
+
+    const unsubscribeParticipant1 = onSnapshot(
+      participant1Query,
+      (snapshot) => {
+        fromParticipant1 = snapshot.docs.map((docSnap) =>
+          normalizeConversationShape(docSnap.id, docSnap.data())
+        );
+        emitMergedConversations();
+      },
+      (error) => {
+        logListenerError('participant1_id', error);
+      }
+    );
+
+    const unsubscribeParticipant2 = onSnapshot(
+      participant2Query,
+      (snapshot) => {
+        fromParticipant2 = snapshot.docs.map((docSnap) =>
+          normalizeConversationShape(docSnap.id, docSnap.data())
+        );
+        emitMergedConversations();
+      },
+      (error) => {
+        logListenerError('participant2_id', error);
+      }
+    );
+
+    return () => {
+      unsubscribeParticipants();
+      unsubscribeParticipant1();
+      unsubscribeParticipant2();
+    };
   }, [user]);
 
 
@@ -150,19 +227,19 @@ export const useMessages = () => {
   }, [state.conversations, user?.uid]);
   // Network status monitoring
   useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const response = await fetch('https://www.google.com/favicon.ico', { method: 'HEAD' });
-        setIsOnline(response.ok);
-      } catch {
+    const unsubscribe = NetInfo.addEventListener((netState) => {
+      setIsOnline(!!netState.isConnected);
+    });
+
+    NetInfo.fetch()
+      .then((netState) => {
+        setIsOnline(!!netState.isConnected);
+      })
+      .catch(() => {
         setIsOnline(false);
-      }
-    };
+      });
 
-    checkConnection();
-    const interval = setInterval(checkConnection, 30000); // Check every 30 seconds
-
-    return () => clearInterval(interval);
+    return () => unsubscribe();
   }, []);
 
   const fetchConversations = async () => {
@@ -233,13 +310,14 @@ export const useMessages = () => {
 
   const sendMessage = async (messageData: SendMessageData) => {
     try {
-      if (!user) {
+      const activeUserId = user?.uid ?? auth.currentUser?.uid;
+      if (!activeUserId) {
         return { success: false, error: 'User not authenticated' };
       }
 
       const result = await messageHelpers.addMessage({
         conversation_id: messageData.conversationId,
-        sender_id: user.uid,
+        sender_id: activeUserId,
         content: messageData.content,
         message_type: messageData.messageType || 'text',
         attachment_url: messageData.attachmentUrl,
@@ -268,29 +346,50 @@ export const useMessages = () => {
 
   const createConversation = async (propertyId: string, otherUserId: string) => {
     try {
-      if (!user) {
+      const activeUserId = user?.uid ?? auth.currentUser?.uid;
+      if (!activeUserId) {
         return { success: false, error: 'User not authenticated' };
       }
 
-      const resolvedOwnerId = user.role === 'owner' ? user.uid : otherUserId;
+      const resolvedOwnerId = user?.role === 'owner' ? activeUserId : otherUserId;
 
-      const existingByOwner = await messageHelpers.findConversationByOwnerAndParticipants(
-        resolvedOwnerId,
-        user.uid,
-        otherUserId
-      );
+      let existingByOwner: { data: any; error: string | null } = { data: null, error: null };
+      try {
+        existingByOwner = await messageHelpers.findConversationByOwnerAndParticipants(
+          resolvedOwnerId,
+          activeUserId,
+          otherUserId
+        );
+      } catch (lookupError: any) {
+        console.warn('[useMessages] Owner conversation lookup failed, continuing with create flow:', lookupError?.message || lookupError);
+      }
 
       if (existingByOwner.data) {
         await messageHelpers.addConversationPropertyReference(existingByOwner.data.id, propertyId);
         return { success: true, data: existingByOwner.data };
       }
 
+      let existingByProperty: { data: any; error: string | null } = { data: null, error: null };
+      try {
+        existingByProperty = await messageHelpers.findConversationByPropertyAndParticipants(
+          propertyId,
+          activeUserId,
+          otherUserId
+        );
+      } catch (lookupError: any) {
+        console.warn('[useMessages] Property conversation lookup failed, continuing with create flow:', lookupError?.message || lookupError);
+      }
+
+      if (existingByProperty.data) {
+        return { success: true, data: existingByProperty.data };
+      }
+
       const result = await messageHelpers.createConversation({
         property_id: propertyId,
         ownerId: resolvedOwnerId,
         propertyReferences: [propertyId],
-        participants: [user.uid, otherUserId],
-        createdBy: user.uid, // Track who created the conversation
+        participants: [activeUserId, otherUserId],
+        createdBy: activeUserId, // Track who created the conversation
         last_message_at: new Date().toISOString(),
       });
 
@@ -308,26 +407,28 @@ export const useMessages = () => {
 
       return { success: true, data: result.data };
     } catch (error: any) {
-      return { success: false, error: 'Failed to create conversation' };
+      console.error('[useMessages] createConversation failed:', error);
+      return { success: false, error: error?.message || 'Failed to create conversation' };
     }
   };
 
   const findConversationByProperty = async (propertyId: string, otherUserId: string) => {
     try {
-      if (!user) {
+      const activeUserId = user?.uid ?? auth.currentUser?.uid;
+      if (!activeUserId) {
         return { success: false, error: 'User not authenticated' };
       }
 
       const result = await messageHelpers.findConversationByOwnerAndParticipants(
         otherUserId,
-        user.uid,
+        activeUserId,
         otherUserId
       );
 
       if (!result.data) {
         const fallback = await messageHelpers.findConversationByPropertyAndParticipants(
           propertyId,
-          user.uid,
+          activeUserId,
           otherUserId
         );
         return { success: true, data: fallback.data };
@@ -345,13 +446,14 @@ export const useMessages = () => {
 
   const findConversationByOwner = async (ownerId: string, otherUserId: string) => {
     try {
-      if (!user) {
+      const activeUserId = user?.uid ?? auth.currentUser?.uid;
+      if (!activeUserId) {
         return { success: false, error: 'User not authenticated' };
       }
 
       const result = await messageHelpers.findConversationByOwnerAndParticipants(
         ownerId,
-        user.uid,
+        activeUserId,
         otherUserId
       );
 

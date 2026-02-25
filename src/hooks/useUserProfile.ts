@@ -43,15 +43,7 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
         
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          
-          // LOG: URL being read from Firestore (initial load)
           const photoURLFromFirestore = userData.photoURL || firebaseUser.photoURL || null;
-          console.log('[useUserProfile] Reading from Firestore (initial load):', {
-            userId: firebaseUser.uid,
-            photoURL: photoURLFromFirestore,
-            hasPhotoURL: !!userData.photoURL,
-            authPhotoURL: firebaseUser.photoURL,
-          });
 
           setProfile({
             uid: firebaseUser.uid,
@@ -63,7 +55,6 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
             createdAt: userData.createdAt || new Date().toISOString(),
             updatedAt: userData.updatedAt || new Date().toISOString(),
           });
-          console.log('[useUserProfile] Initial profile load success');
         } else {
           // Create default profile if it doesn't exist
           const defaultProfile: UserProfile = {
@@ -112,8 +103,6 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
   useEffect(() => {
     if (!firebaseUser) return;
 
-    console.log('[useUserProfile] Setting up real-time listener for user:', firebaseUser.uid);
-
     const userDoc = doc(db, 'users', firebaseUser.uid);
 
     const unsubscribe = onSnapshot(userDoc, (doc) => {
@@ -121,39 +110,34 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
         const userData = doc.data();
         const newPhotoURL = userData.photoURL || firebaseUser.photoURL || null;
 
-        // LOG: URL being read from Firestore (real-time listener)
-        console.log('[useUserProfile] Real-time listener - Reading from Firestore:', {
-          userId: firebaseUser.uid,
-          photoURL: newPhotoURL,
-          hasPhotoURL: !!userData.photoURL,
-          timestamp: new Date().toISOString(),
-        });
+        setProfile((prev) => {
+          const nextProfile: UserProfile = {
+            uid: firebaseUser.uid,
+            name: userData.name || firebaseUser.displayName || 'Guest',
+            email: userData.email || firebaseUser.email || '',
+            photoURL: newPhotoURL,
+            role: userData.role || 'tenant',
+            shareContactInfo: userData.shareContactInfo ?? true,
+            createdAt: userData.createdAt || new Date().toISOString(),
+            updatedAt: userData.updatedAt || new Date().toISOString(),
+          };
 
-        // Check if photoURL has changed
-        const photoURLChanged = profile?.photoURL !== newPhotoURL;
+          // Ignore snapshot-only churn (e.g. presence fields) if visible profile fields are unchanged.
+          if (
+            prev &&
+            prev.uid === nextProfile.uid &&
+            prev.name === nextProfile.name &&
+            prev.email === nextProfile.email &&
+            prev.photoURL === nextProfile.photoURL &&
+            prev.role === nextProfile.role &&
+            prev.shareContactInfo === nextProfile.shareContactInfo
+          ) {
+            return prev;
+          }
 
-        if (photoURLChanged) {
-          console.log('[useUserProfile] PhotoURL changed detected:', {
-            old: profile?.photoURL,
-            new: newPhotoURL,
-          });
-        }
-
-        setProfile({
-          uid: firebaseUser.uid,
-          name: userData.name || firebaseUser.displayName || 'Guest',
-          email: userData.email || firebaseUser.email || '',
-          photoURL: newPhotoURL,
-          role: userData.role || 'tenant',
-          shareContactInfo: userData.shareContactInfo ?? true,
-          createdAt: userData.createdAt || new Date().toISOString(),
-          updatedAt: userData.updatedAt || new Date().toISOString(),
+          return nextProfile;
         });
         setError(null);
-
-        if (photoURLChanged) {
-          console.log('[useUserProfile] Profile updated with new photoURL, UI should refresh');
-        }
       }
     }, (err: any) => {
       console.error('Error listening to profile changes:', err);
@@ -164,10 +148,9 @@ export const useUserProfile = (firebaseUser: FirebaseUser | null) => {
     });
 
     return () => {
-      console.log('[useUserProfile] Cleaning up real-time listener');
       unsubscribe();
     };
-  }, [firebaseUser, profile?.photoURL]);
+  }, [firebaseUser]);
 
   const updateUserProfile = async (
     updates: Partial<Pick<UserProfile, 'name' | 'role' | 'shareContactInfo'>>

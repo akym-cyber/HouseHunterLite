@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Platform,
   TouchableOpacity,
 } from 'react-native';
 import {
@@ -98,6 +99,26 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = async () => {
+    const performSignOut = async () => {
+      const result = await signOut();
+      if (result.success) {
+        router.replace('/(auth)/login');
+      } else {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.alert(`Error\n\n${result.error || 'Failed to sign out'}`);
+        } else {
+          Alert.alert('Error', result.error || 'Failed to sign out');
+        }
+      }
+    };
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm('Are you sure you want to log out?');
+      if (!confirmed) return;
+      await performSignOut();
+      return;
+    }
+
     Alert.alert(
       'Log Out',
       'Are you sure you want to log out?',
@@ -106,14 +127,7 @@ export default function ProfileScreen() {
         {
           text: 'Log Out',
           style: 'destructive',
-          onPress: async () => {
-            const result = await signOut();
-            if (result.success) {
-              router.replace('/(auth)/login');
-            } else {
-              Alert.alert('Error', result.error || 'Failed to sign out');
-            }
-          },
+          onPress: performSignOut,
         },
       ]
     );
