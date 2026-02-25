@@ -43,6 +43,9 @@ const normalizeConversationShape = (docId: string, data: any): Conversation => {
   const participantsFromArray = Array.isArray(data?.participants)
     ? data.participants.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
     : [];
+  const participantsFromParticipantIds = Array.isArray(data?.participantIds)
+    ? data.participantIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    : [];
 
   const participant1 = typeof data?.participant1_id === 'string' ? data.participant1_id : undefined;
   const participant2 = typeof data?.participant2_id === 'string' ? data.participant2_id : undefined;
@@ -50,6 +53,7 @@ const normalizeConversationShape = (docId: string, data: any): Conversation => {
   const mergedParticipants = Array.from(
     new Set([
       ...participantsFromArray,
+      ...participantsFromParticipantIds,
       ...(participant1 ? [participant1] : []),
       ...(participant2 ? [participant2] : []),
     ])
@@ -94,17 +98,19 @@ export const useMessages = () => {
 
     const conversationsRef = collection(db, 'conversations');
     const participantsQuery = query(conversationsRef, where('participants', 'array-contains', user.uid));
+    const participantIdsQuery = query(conversationsRef, where('participantIds', 'array-contains', user.uid));
     const participant1Query = query(conversationsRef, where('participant1_id', '==', user.uid));
     const participant2Query = query(conversationsRef, where('participant2_id', '==', user.uid));
 
     let fromParticipants: Conversation[] = [];
+    let fromParticipantIds: Conversation[] = [];
     let fromParticipant1: Conversation[] = [];
     let fromParticipant2: Conversation[] = [];
     let failedListeners = 0;
 
     const emitMergedConversations = () => {
       const mergedById = new Map<string, Conversation>();
-      [...fromParticipants, ...fromParticipant1, ...fromParticipant2].forEach((conversation) => {
+      [...fromParticipants, ...fromParticipantIds, ...fromParticipant1, ...fromParticipant2].forEach((conversation) => {
         mergedById.set(conversation.id, conversation);
       });
 
@@ -151,6 +157,19 @@ export const useMessages = () => {
       }
     );
 
+    const unsubscribeParticipantIds = onSnapshot(
+      participantIdsQuery,
+      (snapshot) => {
+        fromParticipantIds = snapshot.docs.map((docSnap) =>
+          normalizeConversationShape(docSnap.id, docSnap.data())
+        );
+        emitMergedConversations();
+      },
+      (error) => {
+        logListenerError('participantIds', error);
+      }
+    );
+
     const unsubscribeParticipant1 = onSnapshot(
       participant1Query,
       (snapshot) => {
@@ -179,6 +198,7 @@ export const useMessages = () => {
 
     return () => {
       unsubscribeParticipants();
+      unsubscribeParticipantIds();
       unsubscribeParticipant1();
       unsubscribeParticipant2();
     };
@@ -419,26 +439,33 @@ export const useMessages = () => {
         return { success: false, error: 'User not authenticated' };
       }
 
-      const result = await messageHelpers.findConversationByOwnerAndParticipants(
+      // Prefer exact property-matched conversations first so Contact Owner
+      // opens the existing thread for this listing instead of a different owner thread.
+      const byProperty = await messageHelpers.findConversationByPropertyAndParticipants(
+        propertyId,
+        activeUserId,
+        otherUserId
+      );
+
+      if (byProperty.error) {
+        return { success: false, error: byProperty.error };
+      }
+
+      if (byProperty.data) {
+        return { success: true, data: byProperty.data };
+      }
+
+      const fallback = await messageHelpers.findConversationByOwnerAndParticipants(
         otherUserId,
         activeUserId,
         otherUserId
       );
 
-      if (!result.data) {
-        const fallback = await messageHelpers.findConversationByPropertyAndParticipants(
-          propertyId,
-          activeUserId,
-          otherUserId
-        );
-        return { success: true, data: fallback.data };
+      if (fallback.error) {
+        return { success: false, error: fallback.error };
       }
 
-      if (result.error) {
-        return { success: false, error: result.error };
-      }
-
-      return { success: true, data: result.data };
+      return { success: true, data: fallback.data };
     } catch (error: any) {
       return { success: false, error: 'Failed to find conversation' };
     }

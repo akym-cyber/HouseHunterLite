@@ -4,7 +4,6 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Platform,
   TouchableOpacity,
 } from 'react-native';
 import {
@@ -17,6 +16,8 @@ import {
   Divider,
   ActivityIndicator,
   Snackbar,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -47,6 +48,8 @@ export default function ProfileScreen() {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarError, setSnackbarError] = useState(false);
+  const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
+  const [logoutSubmitting, setLogoutSubmitting] = useState(false);
   const [imageKey, setImageKey] = useState(0);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const isOwner = role === 'owner';
@@ -98,39 +101,23 @@ export default function ProfileScreen() {
     return `${url}${separator}t=${Date.now()}&v=${imageKey}`;
   };
 
-  const handleSignOut = async () => {
-    const performSignOut = async () => {
-      const result = await signOut();
-      if (result.success) {
-        router.replace('/(auth)/login');
-      } else {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.alert(`Error\n\n${result.error || 'Failed to sign out'}`);
-        } else {
-          Alert.alert('Error', result.error || 'Failed to sign out');
-        }
-      }
-    };
+  const performSignOut = async () => {
+    setLogoutSubmitting(true);
+    const result = await signOut();
+    setLogoutSubmitting(false);
 
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const confirmed = window.confirm('Are you sure you want to log out?');
-      if (!confirmed) return;
-      await performSignOut();
+    if (result.success) {
+      setLogoutDialogVisible(false);
+      router.replace('/(auth)/login');
       return;
     }
 
-    Alert.alert(
-      'Log Out',
-      'Are you sure you want to log out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log Out',
-          style: 'destructive',
-          onPress: performSignOut,
-        },
-      ]
-    );
+    setLogoutDialogVisible(false);
+    showSnackbar(result.error || 'Failed to sign out', true);
+  };
+
+  const handleSignOut = () => {
+    setLogoutDialogVisible(true);
   };
 
   const handleSettings = () => {
@@ -492,6 +479,47 @@ export default function ProfileScreen() {
           </View>
         </ScrollView>
 
+        <Portal>
+          <Dialog
+            visible={logoutDialogVisible}
+            onDismiss={() => {
+              if (!logoutSubmitting) {
+                setLogoutDialogVisible(false);
+              }
+            }}
+            style={styles.logoutDialog}
+          >
+            <Dialog.Icon icon="logout-variant" />
+            <Dialog.Title style={styles.logoutDialogTitle}>Log Out?</Dialog.Title>
+            <Dialog.Content>
+              <Text style={styles.logoutDialogText}>
+                You will need to sign in again to access your account.
+              </Text>
+            </Dialog.Content>
+            <Dialog.Actions style={styles.logoutDialogActions}>
+              <Button
+                mode="outlined"
+                style={styles.logoutCancelButton}
+                onPress={() => setLogoutDialogVisible(false)}
+                disabled={logoutSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor={theme.colors.error}
+                textColor={theme.colors.onError}
+                style={styles.logoutConfirmButton}
+                onPress={performSignOut}
+                loading={logoutSubmitting}
+                disabled={logoutSubmitting}
+              >
+                Log Out
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
+
         <Snackbar
           visible={snackbarVisible}
           onDismiss={() => setSnackbarVisible(false)}
@@ -653,6 +681,35 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   snackbarErrorText: {
     color: theme.colors.error,
+  },
+  logoutDialog: {
+    borderRadius: 16,
+    backgroundColor: theme.colors.surface,
+  },
+  logoutDialogTitle: {
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: -4,
+  },
+  logoutDialogText: {
+    textAlign: 'center',
+    color: theme.colors.onSurfaceVariant,
+    lineHeight: 20,
+  },
+  logoutDialogActions: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+  },
+  logoutCancelButton: {
+    flex: 1,
+    borderRadius: 10,
+  },
+  logoutConfirmButton: {
+    flex: 1,
+    borderRadius: 10,
   },
 });
 

@@ -127,6 +127,42 @@ export default function MessagesScreen() {
   const mergedConversations = useMemo(() => {
     if (!user?.uid) return conversations;
 
+    const getConversationTimeMs = (conversation: Conversation): number => {
+      const raw =
+        (conversation as any).last_message_at ??
+        (conversation as any).lastMessageAt ??
+        (conversation as any).updatedAt ??
+        (conversation as any).created_at ??
+        (conversation as any).createdAt;
+      const date = timestampToDate(raw);
+      return date ? date.getTime() : 0;
+    };
+
+    const getLastMessagePreview = (conversation: Conversation): string => {
+      const candidates = [
+        (conversation as any).last_message,
+        (conversation as any).lastMessage,
+        (conversation as any).last_message_text,
+        (conversation as any).lastMessageText,
+        (conversation as any).lastMessagePreview,
+      ];
+      const found = candidates.find(
+        (value) => typeof value === 'string' && value.trim().length > 0
+      );
+      return (found as string | undefined)?.trim() ?? '';
+    };
+
+    const shouldReplaceBase = (existingBase: Conversation, candidate: Conversation): boolean => {
+      const existingPreview = getLastMessagePreview(existingBase);
+      const candidatePreview = getLastMessagePreview(candidate);
+
+      // Prefer the conversation that has real message preview content.
+      if (!existingPreview && candidatePreview) return true;
+      if (existingPreview && !candidatePreview) return false;
+
+      return getConversationTimeMs(candidate) > getConversationTimeMs(existingBase);
+    };
+
     const byOwner = new Map<string, { base: Conversation; refs: Set<string> }>();
 
     conversations.forEach((conv) => {
@@ -142,10 +178,10 @@ export default function MessagesScreen() {
         return;
       }
 
-      // Keep the most recent conversation as the base
-      const existingTime = new Date(existing.base.last_message_at).getTime();
-      const nextTime = new Date(conv.last_message_at).getTime();
-      if (nextTime > existingTime) {
+      // Keep the best conversation as base:
+      // 1) one with actual message preview
+      // 2) otherwise the most recent one
+      if (shouldReplaceBase(existing.base, conv)) {
         byOwner.set(key, { base: conv, refs: new Set([...existing.refs, ...refs]) });
       } else {
         existing.refs = new Set([...existing.refs, ...refs]);

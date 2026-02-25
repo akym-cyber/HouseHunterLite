@@ -120,18 +120,18 @@ export default function PropertyDetailsScreen() {
     }
 
     try {
-      // First, try to find an existing conversation for this owner.
-      const findResult = await findConversationByOwner(ownerId, ownerId);
-
-      if (findResult.success && findResult.data) {
-        router.push({ pathname: '/chat/[id]', params: { id: findResult.data.id } });
-        return;
-      }
-
-      // Fallback: find by property + participants for legacy conversations.
+      // Prefer property-specific thread first so historical messages for this
+      // listing are shown instead of opening an empty owner-level conversation.
       const propertyFind = await findConversationByProperty(property.id, ownerId);
       if (propertyFind.success && propertyFind.data) {
         router.push({ pathname: '/chat/[id]', params: { id: propertyFind.data.id } });
+        return;
+      }
+
+      // Fallback: find any existing owner-level conversation.
+      const findResult = await findConversationByOwner(ownerId, ownerId);
+      if (findResult.success && findResult.data) {
+        router.push({ pathname: '/chat/[id]', params: { id: findResult.data.id } });
         return;
       }
 

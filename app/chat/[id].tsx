@@ -8,8 +8,8 @@ import { useAuth } from '../../src/hooks/useAuth';
 import ChatRoom from '../../src/components/messaging/ChatRoom';
 import { useTheme } from '../../src/theme/useTheme';
 import { propertyHelpers, userHelpers } from '../../src/services/firebase/firebaseHelpers';
-import { Conversation, Message, User, MessageMedia, VoiceUploadPayload } from '../../src/types/database';
-import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { Conversation, Message, Property, User, MessageMedia, VoiceUploadPayload } from '../../src/types/database';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../src/services/firebase/firebaseConfig';
 import { confirmAction } from '../../src/components/chat/ConfirmationModal';
 import { uploadVoiceMessage } from '../../src/services/firebase/voiceMessageService';
@@ -17,6 +17,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const getOtherParticipantId = (conversation: Conversation, currentUserId?: string | null): string | null => {
   if (!currentUserId) return null;
+  const participantIds = (conversation as any).participantIds;
+  if (Array.isArray(participantIds) && participantIds.length > 0) {
+    return participantIds.find((id: string) => id !== currentUserId) || participantIds[0] || null;
+  }
   if (Array.isArray(conversation.participants) && conversation.participants.length > 0) {
     return conversation.participants.find(id => id !== currentUserId) || conversation.participants[0] || null;
   }
@@ -118,36 +122,155 @@ export default function ChatScreen() {
     if (!conversation?.id) return;
 
     setLoadingMessages(true);
-    const messagesRef = collection(db, `conversations/${conversation.id}/messages`);
-    const q = query(messagesRef, orderBy('created_at', 'asc'));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const liveMessages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        conversation_id: conversation.id,
-        ...doc.data(),
-      } as Message));
-      setChatMessages(liveMessages);
+    const selectedOtherId = user?.uid ? getOtherParticipantId(conversation, user.uid) : null;
+    const relatedConversationIds = Array.from(new Set([
+      conversation.id,
+      ...(selectedOtherId && user?.uid
+        ? conversations
+            .filter((conv) => getOtherParticipantId(conv, user.uid) === selectedOtherId)
+            .map((conv) => conv.id)
+        : []),
+    ]));
+
+    const nestedByConversation = new Map<string, Message[]>();
+    const legacySnakeByConversation = new Map<string, Message[]>();
+    const legacyCamelByConversation = new Map<string, Message[]>();
+
+    const toMs = (value: any): number => {
+      if (!value) return 0;
+      if (value instanceof Date) return value.getTime();
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const parsed = new Date(value).getTime();
+        return Number.isNaN(parsed) ? 0 : parsed;
+      }
+      if (typeof value === 'object' && typeof value.seconds === 'number') {
+        return value.seconds * 1000 + ((value.nanoseconds || 0) / 1000000);
+      }
+      if (typeof value === 'object' && typeof value.toMillis === 'function') {
+        return value.toMillis();
+      }
+      return 0;
+    };
+
+    const emitMerged = () => {
+      const mergedMap = new Map<string, Message>();
+      const allMessages = [
+        ...Array.from(nestedByConversation.values()).flat(),
+        ...Array.from(legacySnakeByConversation.values()).flat(),
+        ...Array.from(legacyCamelByConversation.values()).flat(),
+      ];
+
+      allMessages.forEach((msg) => {
+        const key = `${msg.conversation_id || ''}:${msg.id}`;
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, msg);
+        }
+      });
+
+      const merged = Array.from(mergedMap.values()).sort(
+        (a, b) =>
+          toMs((a as any).created_at ?? (a as any).createdAt) -
+          toMs((b as any).created_at ?? (b as any).createdAt)
+      );
+
+      setChatMessages(merged);
       setLoadingMessages(false);
 
-      if (user?.uid && conversation?.id) {
-        const unreadFromOther = liveMessages.filter(
-          (msg) => msg.sender_id !== user.uid && !msg.is_read
+      if (user?.uid) {
+        const unreadFromOther = merged.filter(
+          (msg) =>
+            !(msg as any).__legacyRoot &&
+            msg.sender_id !== user.uid &&
+            !msg.is_read
         );
         if (unreadFromOther.length > 0) {
           unreadFromOther.forEach((msg) => {
-            markMessageAsRead(conversation.id, msg.id).catch(() => {});
+            const messageConversationId =
+              (msg as any).conversation_id || (msg as any).conversationId || conversation.id;
+            if (!messageConversationId) return;
+            markMessageAsRead(messageConversationId, msg.id).catch(() => {});
           });
         }
       }
-    }, (snapshotError) => {
-      console.error('Failed to listen to messages:', snapshotError);
-      setLoadingMessages(false);
-      Alert.alert('Error', 'Failed to load messages. Please try again.');
+    };
+
+    const unsubscribers: Array<() => void> = [];
+
+    relatedConversationIds.forEach((conversationId) => {
+      const messagesRef = collection(db, `conversations/${conversationId}/messages`);
+      const nestedQuery = query(messagesRef, orderBy('created_at', 'asc'));
+      const legacyRootMessagesRef = collection(db, 'messages');
+      const legacyBySnake = query(legacyRootMessagesRef, where('conversation_id', '==', conversationId));
+      const legacyByCamel = query(legacyRootMessagesRef, where('conversationId', '==', conversationId));
+
+      const unsubscribeNested = onSnapshot(
+        nestedQuery,
+        (snapshot) => {
+          nestedByConversation.set(
+            conversationId,
+            snapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              conversation_id: conversationId,
+              ...docSnap.data(),
+            } as Message))
+          );
+          emitMerged();
+        },
+        (snapshotError) => {
+          console.error('Failed to listen to nested messages:', snapshotError);
+          setLoadingMessages(false);
+        }
+      );
+
+      const unsubscribeLegacySnake = onSnapshot(
+        legacyBySnake,
+        (snapshot) => {
+          legacySnakeByConversation.set(
+            conversationId,
+            snapshot.docs.map((docSnap) => {
+              const raw = docSnap.data() as any;
+              return {
+                id: docSnap.id,
+                conversation_id: raw.conversation_id || raw.conversationId || conversationId,
+                ...raw,
+                __legacyRoot: true,
+              } as Message & { __legacyRoot: boolean };
+            })
+          );
+          emitMerged();
+        },
+        () => {}
+      );
+
+      const unsubscribeLegacyCamel = onSnapshot(
+        legacyByCamel,
+        (snapshot) => {
+          legacyCamelByConversation.set(
+            conversationId,
+            snapshot.docs.map((docSnap) => {
+              const raw = docSnap.data() as any;
+              return {
+                id: docSnap.id,
+                conversation_id: raw.conversation_id || raw.conversationId || conversationId,
+                ...raw,
+                __legacyRoot: true,
+              } as Message & { __legacyRoot: boolean };
+            })
+          );
+          emitMerged();
+        },
+        () => {}
+      );
+
+      unsubscribers.push(unsubscribeNested, unsubscribeLegacySnake, unsubscribeLegacyCamel);
     });
 
-    return () => unsubscribe();
-  }, [conversation?.id]);
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [conversation?.id, conversations, user?.uid]);
 
   useEffect(() => {
     return () => {

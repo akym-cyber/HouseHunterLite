@@ -34,9 +34,12 @@ const normalizeParticipantIds = (data: any): string[] => {
   const fromArray = Array.isArray(data?.participants)
     ? data.participants.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
     : [];
+  const fromParticipantIds = Array.isArray(data?.participantIds)
+    ? data.participantIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    : [];
   const p1 = typeof data?.participant1_id === 'string' ? data.participant1_id : null;
   const p2 = typeof data?.participant2_id === 'string' ? data.participant2_id : null;
-  return Array.from(new Set([...fromArray, ...(p1 ? [p1] : []), ...(p2 ? [p2] : [])]));
+  return Array.from(new Set([...fromArray, ...fromParticipantIds, ...(p1 ? [p1] : []), ...(p2 ? [p2] : [])]));
 };
 
 const conversationHasParticipants = (data: any, participant1Id: string, participant2Id: string): boolean => {
@@ -50,6 +53,56 @@ const conversationHasPropertyReference = (data: any, propertyId: string): boolea
     data?.propertyId === propertyId ||
     (Array.isArray(data?.propertyReferences) && data.propertyReferences.includes(propertyId))
   );
+};
+
+const toTimestampMs = (value: any): number => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return value.seconds * 1000 + ((value.nanoseconds || 0) / 1000000);
+  }
+  if (typeof value === 'object' && typeof value.toMillis === 'function') {
+    return value.toMillis();
+  }
+  return 0;
+};
+
+const getConversationActivityMs = (data: any): number => {
+  return toTimestampMs(
+    data?.last_message_at ??
+    data?.lastMessageAt ??
+    data?.updatedAt ??
+    data?.created_at ??
+    data?.createdAt
+  );
+};
+
+const hasMessagePreview = (data: any): boolean => {
+  const previewCandidates = [
+    data?.last_message,
+    data?.lastMessage,
+    data?.last_message_text,
+    data?.lastMessageText,
+    data?.lastMessagePreview,
+  ];
+  return previewCandidates.some((value) => typeof value === 'string' && value.trim().length > 0);
+};
+
+const pickBestConversation = (candidates: Conversation[]): Conversation | null => {
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => {
+    const aPreviewScore = hasMessagePreview(a) ? 1 : 0;
+    const bPreviewScore = hasMessagePreview(b) ? 1 : 0;
+    if (aPreviewScore !== bPreviewScore) {
+      return bPreviewScore - aPreviewScore;
+    }
+    return getConversationActivityMs(b) - getConversationActivityMs(a);
+  })[0];
 };
 
 // Conversation CRUD Operations
@@ -123,8 +176,9 @@ export const conversationHelpers = {
     try {
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
       const seen = new Set<string>();
+      const candidates: Conversation[] = [];
 
-      const inspectSnapshot = (querySnapshot: any): Conversation | null => {
+      const inspectSnapshot = (querySnapshot: any): void => {
         for (const docSnap of querySnapshot.docs) {
           if (seen.has(docSnap.id)) continue;
           seen.add(docSnap.id);
@@ -133,38 +187,33 @@ export const conversationHelpers = {
             conversationHasPropertyReference(data, propertyId) &&
             conversationHasParticipants(data, participant1Id, participant2Id)
           ) {
-            return { id: docSnap.id, ...data } as Conversation;
+            candidates.push({ id: docSnap.id, ...data } as Conversation);
           }
         }
-        return null;
       };
 
       // Avoid composite-index-prone queries here; query broad then filter client-side.
       const participantsSnapshot = await getDocs(
         query(conversationsRef, where('participants', 'array-contains', participant1Id))
       );
-      const participantsMatch = inspectSnapshot(participantsSnapshot);
-      if (participantsMatch) {
-        return { data: participantsMatch, error: null };
-      }
+      inspectSnapshot(participantsSnapshot);
+
+      const participantIdsSnapshot = await getDocs(
+        query(conversationsRef, where('participantIds', 'array-contains', participant1Id))
+      );
+      inspectSnapshot(participantIdsSnapshot);
 
       const legacyP1Snapshot = await getDocs(
         query(conversationsRef, where('participant1_id', '==', participant1Id))
       );
-      const legacyP1Match = inspectSnapshot(legacyP1Snapshot);
-      if (legacyP1Match) {
-        return { data: legacyP1Match, error: null };
-      }
+      inspectSnapshot(legacyP1Snapshot);
 
       const legacyP2Snapshot = await getDocs(
         query(conversationsRef, where('participant2_id', '==', participant1Id))
       );
-      const legacyP2Match = inspectSnapshot(legacyP2Snapshot);
-      if (legacyP2Match) {
-        return { data: legacyP2Match, error: null };
-      }
+      inspectSnapshot(legacyP2Snapshot);
 
-      return { data: null, error: null };
+      return { data: pickBestConversation(candidates), error: null };
     } catch (error: any) {
       console.error('[findConversationByPropertyAndParticipants] Error finding conversation:', error);
       return { data: null, error: error.message };
@@ -400,6 +449,7 @@ export const messageHelpers = {
     try {
       const conversationsRef = collection(db, COLLECTIONS.CONVERSATIONS);
       const seen = new Set<string>();
+      const candidates: Conversation[] = [];
 
       const matchesOwner = (data: any): boolean => {
         return (
@@ -411,51 +461,43 @@ export const messageHelpers = {
         );
       };
 
-      const inspectSnapshot = (querySnapshot: any): Conversation | null => {
+      const inspectSnapshot = (querySnapshot: any): void => {
         for (const docSnap of querySnapshot.docs) {
           if (seen.has(docSnap.id)) continue;
           seen.add(docSnap.id);
           const data = docSnap.data();
           if (matchesOwner(data) && conversationHasParticipants(data, participant1Id, participant2Id)) {
-            return { id: docSnap.id, ...data } as Conversation;
+            candidates.push({ id: docSnap.id, ...data } as Conversation);
           }
         }
-        return null;
       };
 
       const ownerSnapshot = await getDocs(
         query(conversationsRef, where('ownerId', '==', ownerId))
       );
-      const ownerMatch = inspectSnapshot(ownerSnapshot);
-      if (ownerMatch) {
-        return { data: ownerMatch, error: null };
-      }
+      inspectSnapshot(ownerSnapshot);
 
       const participantsSnapshot = await getDocs(
         query(conversationsRef, where('participants', 'array-contains', participant1Id))
       );
-      const participantsMatch = inspectSnapshot(participantsSnapshot);
-      if (participantsMatch) {
-        return { data: participantsMatch, error: null };
-      }
+      inspectSnapshot(participantsSnapshot);
+
+      const participantIdsSnapshot = await getDocs(
+        query(conversationsRef, where('participantIds', 'array-contains', participant1Id))
+      );
+      inspectSnapshot(participantIdsSnapshot);
 
       const legacyP1Snapshot = await getDocs(
         query(conversationsRef, where('participant1_id', '==', participant1Id))
       );
-      const legacyP1Match = inspectSnapshot(legacyP1Snapshot);
-      if (legacyP1Match) {
-        return { data: legacyP1Match, error: null };
-      }
+      inspectSnapshot(legacyP1Snapshot);
 
       const legacyP2Snapshot = await getDocs(
         query(conversationsRef, where('participant2_id', '==', participant1Id))
       );
-      const legacyP2Match = inspectSnapshot(legacyP2Snapshot);
-      if (legacyP2Match) {
-        return { data: legacyP2Match, error: null };
-      }
+      inspectSnapshot(legacyP2Snapshot);
 
-      return { data: null, error: null };
+      return { data: pickBestConversation(candidates), error: null };
     } catch (error: any) {
       console.error('[findConversationByOwnerAndParticipants] Error finding conversation:', error);
       return { data: null, error: error.message };
@@ -527,9 +569,6 @@ export const messageHelpers = {
 
   // Find conversation by property and participants
   findConversationByPropertyAndParticipants: conversationHelpers.findConversationByPropertyAndParticipants,
-
-  // Find conversation by owner and participants
-  findConversationByOwnerAndParticipants: conversationHelpers.findConversationByOwnerAndParticipants,
 
   // Add property reference
   addConversationPropertyReference: conversationHelpers.addConversationPropertyReference,
