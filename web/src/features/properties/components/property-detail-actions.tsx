@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { addFavorite, removeFavorite } from "@/features/favorites/services/favorites-service";
 import { useFavorites } from "@/features/favorites/hooks/use-favorites";
 import { useAuthStore } from "@/features/auth/store/use-auth-store";
+import { trackPropertySave } from "@/features/properties/services/property-analytics-service";
 
 type PropertyDetailActionsProps = {
   propertyId: string;
@@ -57,6 +58,9 @@ export function PropertyDetailActions({
           imageUrls,
           price
         });
+        await trackPropertySave(propertyId).catch(() => {
+          // Favorites should still succeed if analytics tracking fails.
+        });
       }
     } catch (toggleError) {
       setError(toggleError instanceof Error ? toggleError.message : "Failed to update favorites.");
@@ -77,7 +81,7 @@ export function PropertyDetailActions({
       </button>
 
       <Link
-        href={`/messages?userId=${encodeURIComponent(ownerId)}`}
+        href={`/messages?userId=${encodeURIComponent(ownerId)}&propertyId=${encodeURIComponent(propertyId)}`}
         className="inline-flex w-full items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700"
       >
         Message Owner

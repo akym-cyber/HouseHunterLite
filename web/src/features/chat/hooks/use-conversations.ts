@@ -1,7 +1,6 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 import {
   getMoreConversations,
   subscribeToConversations
@@ -24,16 +23,14 @@ export function useConversations(
   pageSize = DEFAULT_PAGE_SIZE
 ): UseConversationsResult {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!userId) {
       setConversations([]);
-      setLastDoc(undefined);
       setHasMore(false);
       setIsLoading(false);
       return;
@@ -43,10 +40,20 @@ export function useConversations(
     const unsubscribe = subscribeToConversations(
       userId,
       pageSize,
-      ({ items, lastDoc: snapshotLastDoc }) => {
-        setConversations(items);
-        setLastDoc(snapshotLastDoc);
-        setHasMore(false);
+      ({ items, hasMore: canLoadMore }) => {
+        setConversations((prev) => {
+          const merged = new Map<string, Conversation>();
+          for (const row of [...items, ...prev]) {
+            const existing = merged.get(row.id);
+            if (!existing || (row.updatedAt ?? row.lastMessageAt ?? 0) >= (existing.updatedAt ?? existing.lastMessageAt ?? 0)) {
+              merged.set(row.id, row);
+            }
+          }
+          return Array.from(merged.values()).sort(
+            (a, b) => (b.updatedAt ?? b.lastMessageAt ?? 0) - (a.updatedAt ?? a.lastMessageAt ?? 0)
+          );
+        });
+        setHasMore(canLoadMore);
         setError(null);
         setIsLoading(false);
       },
@@ -60,22 +67,33 @@ export function useConversations(
   }, [pageSize, userId]);
 
   const loadMore = useCallback(async () => {
-    if (!userId || !lastDoc || isLoadingMore || !hasMore) {
+    if (!userId || isLoadingMore || !hasMore) {
       return;
     }
 
     setIsLoadingMore(true);
     try {
-      const nextPage = await getMoreConversations(userId, lastDoc, pageSize);
-      setConversations((prev) => [...prev, ...nextPage.items]);
-      setLastDoc(nextPage.lastDoc);
-      setHasMore(false);
+      const nextPage = await getMoreConversations(userId, conversations.length, pageSize);
+      setConversations((prev) => {
+        const merged = new Map<string, Conversation>();
+        for (const row of [...prev, ...nextPage.items]) {
+          const existing = merged.get(row.id);
+          if (!existing || (row.updatedAt ?? row.lastMessageAt ?? 0) >= (existing.updatedAt ?? existing.lastMessageAt ?? 0)) {
+            merged.set(row.id, row);
+          }
+        }
+
+        return Array.from(merged.values()).sort(
+          (a, b) => (b.updatedAt ?? b.lastMessageAt ?? 0) - (a.updatedAt ?? a.lastMessageAt ?? 0)
+        );
+      });
+      setHasMore(nextPage.hasMore);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load more conversations");
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, isLoadingMore, lastDoc, pageSize, userId]);
+  }, [conversations.length, hasMore, isLoadingMore, pageSize, userId]);
 
   return useMemo(
     () => ({

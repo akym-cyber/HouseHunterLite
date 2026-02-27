@@ -1,20 +1,19 @@
-import {
-  DocumentData,
-  QueryDocumentSnapshot,
+﻿import {
   collection,
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   CollectionReference,
-  where
+  where,
+  DocumentData
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Conversation } from "@/features/chat/types/chat";
 
 const CONVERSATIONS_COLLECTION = "conversations";
 const DEFAULT_PAGE_SIZE = 20;
+const MAX_FETCH = 250;
 
 function mapTimestamp(value: unknown): number | undefined {
   if (typeof value === "number") return value;
@@ -71,8 +70,6 @@ async function fetchLatestMessagePreview(
   ) as CollectionReference<DocumentData>;
 
   const candidates = [
-    query(messagesSubRef, orderBy("created_at", "desc"), limit(1)),
-    query(messagesSubRef, orderBy("createdAt", "desc"), limit(1)),
     query(messagesSubRef, limit(1))
   ];
 
@@ -125,6 +122,12 @@ function mapConversation(
   return {
     id: docId,
     participantIds,
+    propertyId:
+      typeof data.propertyId === "string"
+        ? data.propertyId
+        : typeof data.property_id === "string"
+          ? data.property_id
+          : undefined,
     lastMessageText: lastMessageTextRaw ? String(lastMessageTextRaw) : undefined,
     lastMessageAt,
     unreadCountByUser: data.unreadCountByUser as Record<string, number> | undefined,
@@ -132,7 +135,7 @@ function mapConversation(
   };
 }
 
-function buildParticipantIdsQuery(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
+function buildParticipantIdsQuery(userId: string, pageSize = MAX_FETCH) {
   return query(
     collection(db, CONVERSATIONS_COLLECTION),
     where("participantIds", "array-contains", userId),
@@ -140,7 +143,7 @@ function buildParticipantIdsQuery(userId: string, pageSize = DEFAULT_PAGE_SIZE) 
   );
 }
 
-function buildParticipantsQuery(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
+function buildParticipantsQuery(userId: string, pageSize = MAX_FETCH) {
   return query(
     collection(db, CONVERSATIONS_COLLECTION),
     where("participants", "array-contains", userId),
@@ -148,7 +151,7 @@ function buildParticipantsQuery(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
   );
 }
 
-function buildParticipant1Query(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
+function buildParticipant1Query(userId: string, pageSize = MAX_FETCH) {
   return query(
     collection(db, CONVERSATIONS_COLLECTION),
     where("participant1_id", "==", userId),
@@ -156,7 +159,7 @@ function buildParticipant1Query(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
   );
 }
 
-function buildParticipant2Query(userId: string, pageSize = DEFAULT_PAGE_SIZE) {
+function buildParticipant2Query(userId: string, pageSize = MAX_FETCH) {
   return query(
     collection(db, CONVERSATIONS_COLLECTION),
     where("participant2_id", "==", userId),
@@ -168,9 +171,52 @@ function sortConversations(items: Conversation[]): Conversation[] {
   return [...items].sort((a, b) => (b.updatedAt ?? b.lastMessageAt ?? 0) - (a.updatedAt ?? a.lastMessageAt ?? 0));
 }
 
+function mergeAndSort(...groups: Conversation[][]): Conversation[] {
+  const merged = new Map<string, Conversation>();
+  for (const group of groups) {
+    for (const item of group) {
+      const existing = merged.get(item.id);
+      if (!existing || (item.updatedAt ?? item.lastMessageAt ?? 0) >= (existing.updatedAt ?? existing.lastMessageAt ?? 0)) {
+        merged.set(item.id, item);
+      }
+    }
+  }
+
+  return sortConversations(Array.from(merged.values()));
+}
+
+async function fetchAllUserConversations(userId: string): Promise<Conversation[]> {
+  const queries = [
+    buildParticipantIdsQuery(userId, MAX_FETCH),
+    buildParticipantsQuery(userId, MAX_FETCH),
+    buildParticipant1Query(userId, MAX_FETCH),
+    buildParticipant2Query(userId, MAX_FETCH)
+  ];
+
+  const snapshots = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        return await getDocs(q);
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const groups: Conversation[][] = [];
+  for (const snapshot of snapshots) {
+    if (!snapshot) continue;
+    groups.push(
+      snapshot.docs.map((docSnap) => mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>))
+    );
+  }
+
+  return mergeAndSort(...groups);
+}
+
 export type ConversationsPage = {
   items: Conversation[];
-  lastDoc?: QueryDocumentSnapshot<DocumentData>;
+  hasMore: boolean;
 };
 
 export function subscribeToConversations(
@@ -179,8 +225,7 @@ export function subscribeToConversations(
   callback: (data: ConversationsPage) => void,
   onError?: (error: Error) => void
 ) {
-  const participant1Query = buildParticipant1Query(userId, pageSize);
-  const participant2Query = buildParticipant2Query(userId, pageSize);
+  const normalizedPageSize = Math.max(1, pageSize || DEFAULT_PAGE_SIZE);
 
   let participant1Items: Conversation[] = [];
   let participant2Items: Conversation[] = [];
@@ -190,12 +235,21 @@ export function subscribeToConversations(
   let enrichRunId = 0;
   const previewCache = new Map<string, { stamp: number; text?: string; lastMessageAt?: number }>();
 
-  const enrichAndEmit = async (baseItems: Conversation[]) => {
-    const missingPreview = baseItems.filter((item) => !item.lastMessageText).slice(0, 8);
+  const emit = () => {
+    if (!isActive) return;
+    const merged = mergeAndSort(participant1Items, participant2Items, modernItems);
+    const sliced = merged.slice(0, normalizedPageSize);
+
+    callback({
+      items: sliced,
+      hasMore: merged.length > normalizedPageSize
+    });
+
+    const missingPreview = sliced.filter((item) => !item.lastMessageText).slice(0, 8);
     if (missingPreview.length === 0) return;
 
     const runId = ++enrichRunId;
-    const updates = await Promise.all(
+    void Promise.all(
       missingPreview.map(async (item) => {
         const stamp = item.updatedAt ?? item.lastMessageAt ?? 0;
         const cached = previewCache.get(item.id);
@@ -211,72 +265,28 @@ export function subscribeToConversations(
         });
         return { id: item.id, text: preview.text, lastMessageAt: preview.lastMessageAt };
       })
-    );
+    ).then((updates) => {
+      if (!isActive || runId !== enrichRunId) return;
+      const updateMap = new Map(updates.map((item) => [item.id, item]));
+      const enriched = sliced.map((item) => {
+        const update = updateMap.get(item.id);
+        if (!update) return item;
+        return {
+          ...item,
+          lastMessageText: item.lastMessageText ?? update.text,
+          lastMessageAt: item.lastMessageAt ?? update.lastMessageAt,
+          updatedAt: item.updatedAt ?? update.lastMessageAt
+        };
+      });
 
-    if (!isActive || runId !== enrichRunId) return;
-    const updateMap = new Map(updates.map((item) => [item.id, item]));
-
-    const enriched = baseItems.map((item) => {
-      const update = updateMap.get(item.id);
-      if (!update) return item;
-      return {
-        ...item,
-        lastMessageText: item.lastMessageText ?? update.text,
-        lastMessageAt: item.lastMessageAt ?? update.lastMessageAt,
-        updatedAt: item.updatedAt ?? update.lastMessageAt
-      };
-    });
-
-    callback({
-      items: sortConversations(enriched),
-      lastDoc: undefined
+      callback({
+        items: enriched,
+        hasMore: merged.length > normalizedPageSize
+      });
+    }).catch(() => {
+      // keep base list
     });
   };
-
-  const emit = () => {
-    if (!isActive) return;
-    const map = new Map<string, Conversation>();
-    for (const item of [...participant1Items, ...participant2Items, ...modernItems]) {
-      map.set(item.id, item);
-    }
-    const merged = sortConversations(Array.from(map.values()));
-    callback({
-      items: merged,
-      lastDoc: undefined
-    });
-    void enrichAndEmit(merged);
-  };
-
-  // Best-effort read for newer conversation formats.
-  void getDocs(buildParticipantIdsQuery(userId, pageSize))
-    .then((snapshot) => {
-      if (!isActive) return;
-      modernItems = [
-        ...modernItems,
-        ...snapshot.docs.map((docSnap) =>
-          mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>)
-        )
-      ];
-      emit();
-    })
-    .catch(() => {
-      // ignore; dataset may be legacy-only
-    });
-
-  void getDocs(buildParticipantsQuery(userId, pageSize))
-    .then((snapshot) => {
-      if (!isActive) return;
-      modernItems = [
-        ...modernItems,
-        ...snapshot.docs.map((docSnap) =>
-          mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>)
-        )
-      ];
-      emit();
-    })
-    .catch(() => {
-      // ignore; dataset may not include participants array
-    });
 
   const handleWatchError = (error: Error) => {
     watchedFailures += 1;
@@ -286,30 +296,42 @@ export function subscribeToConversations(
   };
 
   const unsubParticipant1 = onSnapshot(
-    participant1Query,
+    buildParticipant1Query(userId, MAX_FETCH),
     (snapshot) => {
       participant1Items = snapshot.docs.map((docSnap) =>
         mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>)
       );
       emit();
     },
-    (error) => {
-      handleWatchError(error);
-    }
+    handleWatchError
   );
 
   const unsubParticipant2 = onSnapshot(
-    participant2Query,
+    buildParticipant2Query(userId, MAX_FETCH),
     (snapshot) => {
       participant2Items = snapshot.docs.map((docSnap) =>
         mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>)
       );
       emit();
     },
-    (error) => {
-      handleWatchError(error);
-    }
+    handleWatchError
   );
+
+  // Best-effort read for newer conversation formats.
+  void Promise.all([
+    getDocs(buildParticipantIdsQuery(userId, MAX_FETCH)).catch(() => null),
+    getDocs(buildParticipantsQuery(userId, MAX_FETCH)).catch(() => null)
+  ]).then((snapshots) => {
+    if (!isActive) return;
+
+    modernItems = snapshots
+      .filter((snapshot): snapshot is NonNullable<typeof snapshot> => !!snapshot)
+      .flatMap((snapshot) =>
+        snapshot.docs.map((docSnap) => mapConversation(docSnap.id, docSnap.data() as Record<string, unknown>))
+      );
+
+    emit();
+  });
 
   return () => {
     isActive = false;
@@ -320,13 +342,13 @@ export function subscribeToConversations(
 
 export async function getMoreConversations(
   userId: string,
-  afterDoc: QueryDocumentSnapshot<DocumentData>,
+  loadedCount: number,
   pageSize = DEFAULT_PAGE_SIZE
 ): Promise<ConversationsPage> {
-  void userId;
-  void afterDoc;
-  void pageSize;
-  // Multi-shape conversation support currently uses live merged snapshots.
-  // Pagination is intentionally disabled to avoid inconsistent cursors.
-  return { items: [], lastDoc: undefined };
+  const all = await fetchAllUserConversations(userId);
+  const nextItems = all.slice(loadedCount, loadedCount + pageSize);
+  return {
+    items: nextItems,
+    hasMore: all.length > loadedCount + nextItems.length
+  };
 }

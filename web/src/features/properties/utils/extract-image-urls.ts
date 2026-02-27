@@ -7,6 +7,16 @@ const IMAGE_KEYS = [
   "thumbnail_url"
 ] as const;
 
+const VIDEO_KEYS = [
+  "videoUrl",
+  "video_url"
+] as const;
+
+export type PropertyVideoEntry = {
+  url: string;
+  thumbnailUrl?: string;
+};
+
 function normalizeUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -62,3 +72,53 @@ export function extractImageUrls(data: Record<string, unknown>): string[] {
   return Array.from(new Set(urls));
 }
 
+export function extractVideoEntries(data: Record<string, unknown>): PropertyVideoEntry[] {
+  const items: PropertyVideoEntry[] = [];
+  const pushVideo = (urlValue: unknown, thumbnailValue?: unknown) => {
+    const url = normalizeUrl(urlValue);
+    if (!url) return;
+    const thumbnailUrl = normalizeUrl(thumbnailValue);
+    items.push({ url, thumbnailUrl });
+  };
+
+  for (const key of VIDEO_KEYS) {
+    pushVideo(data[key]);
+  }
+
+  const videos = data.videos;
+  if (Array.isArray(videos)) {
+    for (const row of videos) {
+      if (typeof row === "string") {
+        pushVideo(row);
+        continue;
+      }
+      if (!row || typeof row !== "object") continue;
+      const typed = row as Record<string, unknown>;
+      pushVideo(typed.url ?? typed.videoUrl ?? typed.video_url, typed.thumbnailUrl ?? typed.thumbnail_url);
+    }
+  }
+
+  if (Array.isArray(data.media)) {
+    for (const row of data.media) {
+      if (!row || typeof row !== "object") continue;
+      const typed = row as Record<string, unknown>;
+      const mediaType = typeof typed.type === "string" ? typed.type.toLowerCase() : "";
+      if (mediaType !== "video") continue;
+      pushVideo(typed.url ?? typed.videoUrl ?? typed.video_url, typed.thumbnailUrl ?? typed.thumbnail_url);
+    }
+  }
+
+  const deduped = new Map<string, PropertyVideoEntry>();
+  for (const item of items) {
+    if (!deduped.has(item.url)) {
+      deduped.set(item.url, item);
+      continue;
+    }
+    const existing = deduped.get(item.url)!;
+    if (!existing.thumbnailUrl && item.thumbnailUrl) {
+      deduped.set(item.url, item);
+    }
+  }
+
+  return Array.from(deduped.values());
+}

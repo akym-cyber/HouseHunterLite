@@ -43,11 +43,45 @@ export function FavoritesList({ userId }: FavoritesListProps) {
           <PropertyImageStrip
             title={item.title ?? `Property ${item.propertyId}`}
             imageUrls={Array.from(new Set([...(item.imageUrls ?? []), ...(item.coverUrl ? [item.coverUrl] : [])]))}
+            videoEntries={item.videoEntries}
             className="rounded-none"
           />
           <div className="p-4">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              {item.isFeatured ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                  Featured
+                </span>
+              ) : null}
+              {typeof item.boostExpiresAt === "number" && item.boostExpiresAt > Date.now() ? (
+                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                  Boosted
+                </span>
+              ) : null}
+              {item.isVerified ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  Verified
+                </span>
+              ) : null}
+              {(item.videoEntries?.length ?? 0) > 0 ? (
+                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                  Video
+                </span>
+              ) : null}
+              {item.propertyType ? (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                  {item.propertyType}
+                </span>
+              ) : null}
+            </div>
             <h3 className="text-sm font-semibold text-slate-900">{item.title ?? "Untitled property"}</h3>
             <p className="mt-1 text-xs text-slate-500">{item.location ?? "Location unavailable"}</p>
+            {(typeof item.beds === "number" || typeof item.baths === "number") ? (
+              <p className="mt-1 text-xs text-slate-500">
+                {typeof item.beds === "number" ? item.beds : "-"} bed |{" "}
+                {typeof item.baths === "number" ? item.baths : "-"} bath
+              </p>
+            ) : null}
             {typeof item.price === "number" ? (
               <p className="mt-3 text-sm font-semibold text-brand-700">
                 KES {item.price.toLocaleString()} / month

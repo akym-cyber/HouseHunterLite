@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Favorite } from "@/features/favorites/types/favorite";
-import { extractImageUrls } from "@/features/properties/utils/extract-image-urls";
+import { extractImageUrls, extractVideoEntries } from "@/features/properties/utils/extract-image-urls";
 
 const MAX_FAVORITES_PAGE = 50;
 
@@ -51,8 +51,16 @@ function mapFavoriteDoc(docId: string, data: Record<string, unknown>): FavoriteD
 }
 
 async function hydrateFavorites(items: FavoriteDoc[]): Promise<Favorite[]> {
+  const dedupedByProperty = new Map<string, FavoriteDoc>();
+  for (const item of items) {
+    const existing = dedupedByProperty.get(item.propertyId);
+    if (!existing || (item.savedAt ?? 0) > (existing.savedAt ?? 0)) {
+      dedupedByProperty.set(item.propertyId, item);
+    }
+  }
+
   const hydrated = await Promise.all(
-    items.map<Promise<Favorite | null>>(async (item) => {
+    Array.from(dedupedByProperty.values()).map<Promise<Favorite | null>>(async (item) => {
       try {
         const propertySnap = await getDoc(doc(db, "properties", item.propertyId));
         if (!propertySnap.exists()) {
@@ -61,7 +69,22 @@ async function hydrateFavorites(items: FavoriteDoc[]): Promise<Favorite[]> {
 
         const propertyData = propertySnap.data() as Record<string, unknown>;
         const imageUrls = extractImageUrls(propertyData);
+        const videoEntries = extractVideoEntries(propertyData);
         const priceRaw = Number(propertyData.price ?? NaN);
+        const bedsRaw = Number(propertyData.beds ?? propertyData.bedrooms ?? NaN);
+        const bathsRaw = Number(propertyData.baths ?? propertyData.bathrooms ?? NaN);
+        const propertyTypeRaw =
+          typeof propertyData.propertyType === "string" && propertyData.propertyType.trim()
+            ? propertyData.propertyType.trim()
+            : typeof propertyData.type === "string" && propertyData.type.trim()
+              ? propertyData.type.trim()
+              : undefined;
+        const isVerifiedRaw = propertyData.isVerified ?? propertyData.verified;
+        const isFeaturedRaw = propertyData.isFeatured ?? propertyData.featured;
+        const featuredUntil = mapTimestamp(propertyData.featuredUntil ?? propertyData.featured_until);
+        const boostExpiresAt = mapTimestamp(
+          propertyData.boostExpiresAt ?? propertyData.boost_expires_at ?? propertyData.expiresAt
+        );
 
         return {
           id: item.propertyId,
@@ -70,6 +93,14 @@ async function hydrateFavorites(items: FavoriteDoc[]): Promise<Favorite[]> {
           location: mapPropertyLocation(propertyData),
           coverUrl: imageUrls[0],
           imageUrls,
+          videoEntries,
+          propertyType: propertyTypeRaw,
+          beds: Number.isFinite(bedsRaw) ? bedsRaw : undefined,
+          baths: Number.isFinite(bathsRaw) ? bathsRaw : undefined,
+          isVerified: typeof isVerifiedRaw === "boolean" ? isVerifiedRaw : undefined,
+          isFeatured: typeof isFeaturedRaw === "boolean" ? isFeaturedRaw : undefined,
+          featuredUntil,
+          boostExpiresAt,
           price: Number.isFinite(priceRaw) ? priceRaw : undefined,
           savedAt: item.savedAt
         };

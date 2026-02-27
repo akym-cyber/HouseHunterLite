@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { getPropertyByIdServer } from "@/features/properties/services/property-server-service";
 import { PropertyImageStrip } from "@/features/properties/components/property-image-strip";
 import { PropertyDetailActions } from "@/features/properties/components/property-detail-actions";
+import { TrackRecentlyViewed } from "@/features/properties/components/track-recently-viewed";
+import { TrackPropertyView } from "@/features/properties/components/track-property-view";
 
 type PropertyDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -17,11 +19,18 @@ export default async function PropertyDetailPage({ params }: PropertyDetailPageP
 
   return (
     <div className="space-y-6">
+      <TrackRecentlyViewed propertyId={property.id} />
+      <TrackPropertyView propertyId={property.id} />
+
       <section className="grid gap-6 lg:grid-cols-[1.5fr,1fr]">
         <div className="space-y-4">
           <PropertyImageStrip
             title={property.title}
             imageUrls={Array.from(new Set([...(property.imageUrls ?? []), ...(property.coverUrl ? [property.coverUrl] : [])]))}
+            videoEntries={property.videoEntries}
+            aspectClassName="aspect-[16/9]"
+            showCounter
+            showThumbnails
           />
 
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">

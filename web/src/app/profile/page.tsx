@@ -1,4 +1,5 @@
-import { AuthStatusCard } from "@/features/auth/components/auth-status-card";
+﻿import { AuthStatusCard } from "@/features/auth/components/auth-status-card";
+import { SavedSearchesPanel } from "@/features/search/components/saved-searches-panel";
 import { requireSession } from "@/lib/auth/require-session";
 
 export default async function ProfilePage() {
@@ -9,10 +10,11 @@ export default async function ProfilePage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h1 className="text-xl font-semibold text-slate-900">Profile</h1>
         <p className="mt-2 text-sm text-slate-600">
-          This is the owner/tenant profile shell with global auth state from Firebase.
+          Account controls, auth state, and saved search alerts.
         </p>
       </section>
       <AuthStatusCard />
+      <SavedSearchesPanel />
     </div>
   );
 }

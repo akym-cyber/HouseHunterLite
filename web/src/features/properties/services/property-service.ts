@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Property } from "@/features/properties/types/property";
-import { extractImageUrls } from "@/features/properties/utils/extract-image-urls";
+import { extractImageUrls, extractVideoEntries } from "@/features/properties/utils/extract-image-urls";
 
 const COLLECTION_NAME = "properties";
 const MAX_PAGE_SIZE = 50;
@@ -33,6 +33,16 @@ function mapTimestamp(value: unknown): number | undefined {
 
 function mapProperty(docId: string, data: Record<string, unknown>): Property {
   const imageUrls = extractImageUrls(data);
+  const videoEntries = extractVideoEntries(data);
+  const latRaw = Number(data.lat ?? data.latitude ?? NaN);
+  const lngRaw = Number(data.lng ?? data.longitude ?? NaN);
+  const lat = Number.isFinite(latRaw) ? latRaw : undefined;
+  const lng = Number.isFinite(lngRaw) ? lngRaw : undefined;
+  const featuredUntil = mapTimestamp(data.featuredUntil ?? data.featured_until);
+  const boostExpiresAt = mapTimestamp(data.boostExpiresAt ?? data.boost_expires_at ?? data.expiresAt);
+  const viewsRaw = Number(data.views ?? NaN);
+  const savesRaw = Number(data.saves ?? NaN);
+  const messagesStartedRaw = Number(data.messagesStarted ?? data.messages_started ?? NaN);
 
   return {
     id: docId,
@@ -43,8 +53,21 @@ function mapProperty(docId: string, data: Record<string, unknown>): Property {
     baths: Number(data.baths ?? data.bathrooms ?? 0),
     coverUrl: imageUrls[0],
     imageUrls,
+    videoEntries,
+    lat,
+    lng,
+    latitude: lat,
+    longitude: lng,
     ownerId: String(data.ownerId ?? ""),
     description: typeof data.description === "string" ? data.description : undefined,
+    isVerified: typeof data.isVerified === "boolean" ? data.isVerified : undefined,
+    isFeatured: typeof data.isFeatured === "boolean" ? data.isFeatured : undefined,
+    featuredUntil,
+    boostExpiresAt,
+    expiresAt: boostExpiresAt,
+    views: Number.isFinite(viewsRaw) ? viewsRaw : 0,
+    saves: Number.isFinite(savesRaw) ? savesRaw : 0,
+    messagesStarted: Number.isFinite(messagesStartedRaw) ? messagesStartedRaw : 0,
     createdAt: mapTimestamp(data.createdAt)
   };
 }

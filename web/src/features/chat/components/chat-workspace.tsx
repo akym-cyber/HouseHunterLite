@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -20,6 +20,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/features/auth/store/use-auth-store";
 import { useConversations } from "@/features/chat/hooks/use-conversations";
 import { db } from "@/lib/firebase/client";
+import { trackPropertyMessageStart } from "@/features/properties/services/property-analytics-service";
 
 type ChatWorkspaceProps = {
   userId: string;
@@ -54,6 +55,7 @@ function buildConversationRowItem(
   base: {
     id: string;
     participantIds: string[];
+    propertyId?: string;
     lastMessageText?: string;
     lastMessageAt?: number;
     updatedAt?: number;
@@ -296,13 +298,13 @@ function getMessageStatusTick(
     return { icon: "...", className: "text-slate-300" };
   }
   if (message.status === "read" || message.isRead) {
-    return { icon: "✓✓", className: "text-sky-400" };
+    return { icon: "âœ“âœ“", className: "text-sky-400" };
   }
   if (message.status === "delivered") {
-    return { icon: "✓✓", className: "text-slate-300" };
+    return { icon: "âœ“âœ“", className: "text-slate-300" };
   }
 
-  return { icon: "✓", className: "text-slate-300" };
+  return { icon: "âœ“", className: "text-slate-300" };
 }
 
 function getMessageStatusMeta(
@@ -448,6 +450,35 @@ async function findExistingConversationIdForUsers(
   return null;
 }
 
+async function conversationHasMessages(conversationId: string): Promise<boolean> {
+  try {
+    const subcollectionSnapshot = await getDocs(
+      buildFsQuery(collection(db, "conversations", conversationId, "messages"), limit(1))
+    );
+    if (!subcollectionSnapshot.empty) return true;
+  } catch {
+    // fallback to legacy root messages query below
+  }
+
+  try {
+    const legacyBySnake = await getDocs(
+      buildFsQuery(collection(db, "messages"), where("conversation_id", "==", conversationId), limit(1))
+    );
+    if (!legacyBySnake.empty) return true;
+  } catch {
+    // try camelCase fallback
+  }
+
+  try {
+    const legacyByCamel = await getDocs(
+      buildFsQuery(collection(db, "messages"), where("conversationId", "==", conversationId), limit(1))
+    );
+    return !legacyByCamel.empty;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchUserProfileByUid(uid: string): Promise<UserProfile> {
   try {
     const directSnap = await getDoc(doc(db, "users", uid));
@@ -474,6 +505,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
   const effectiveUserId = authUser?.uid;
   const canQuery = isHydrated && !!effectiveUserId;
   const requestedRecipientId = searchParams.get("userId")?.trim();
+  const requestedPropertyId = searchParams.get("propertyId")?.trim();
   const pendingRecipientId =
     requestedRecipientId && requestedRecipientId !== effectiveUserId ? requestedRecipientId : null;
   const [searchQuery, setSearchQuery] = useState("");
@@ -486,10 +518,11 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
   const [messagesError, setMessagesError] = useState<string | null>(null);
   const presenceUnsubsRef = useRef<Map<string, () => void>>(new Map());
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
+  const conversationListRef = useRef<HTMLDivElement | null>(null);
   const statusUpdateGuardRef = useRef<Map<string, "delivered" | "read">>(new Map());
   const [presenceNow, setPresenceNow] = useState<number>(() => Date.now());
 
-  const { conversations, isLoading, error } = useConversations(canQuery ? effectiveUserId : null);
+  const { conversations, isLoading, isLoadingMore, hasMore, error, loadMore } = useConversations(canQuery ? effectiveUserId : null);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -676,6 +709,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
         buildConversationRowItem(
           {
             ...newer,
+            propertyId: newer.propertyId ?? older.propertyId,
             lastMessageText: newer.lastMessageText ?? older.lastMessageText,
             lastMessageAt: newer.lastMessageAt ?? older.lastMessageAt,
             updatedAt: newer.updatedAt ?? older.updatedAt
@@ -713,12 +747,13 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     return buildConversationRowItem(
       {
         id: `pending:${pendingRecipientId}`,
-        participantIds: [effectiveUserId, pendingRecipientId]
+        participantIds: [effectiveUserId, pendingRecipientId],
+        propertyId: requestedPropertyId
       },
       0,
       []
     );
-  }, [effectiveUserId, pendingRecipientId]);
+  }, [effectiveUserId, pendingRecipientId, requestedPropertyId]);
   const activeConversation = selectedConversation ?? pendingConversation;
 
   useEffect(() => {
@@ -963,6 +998,23 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     return rows;
   }, [messages]);
 
+
+  useEffect(() => {
+    const node = conversationListRef.current;
+    if (!node) return;
+
+    const onScroll = () => {
+      const distanceToBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+      if (distanceToBottom < 160 && hasMore && !isLoadingMore) {
+        void loadMore();
+      }
+    };
+
+    node.addEventListener("scroll", onScroll);
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+    };
+  }, [hasMore, isLoadingMore, loadMore]);
   const getInitialForConversation = (participantIds: string[]): string => {
     const label = getConversationLabel(participantIds);
     return label.charAt(0).toUpperCase() || "U";
@@ -975,9 +1027,24 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     return pendingRecipientId ?? null;
   };
 
-  const ensureConversationForSend = async (): Promise<string> => {
-    if (selectedConversation) {
-      return selectedConversation.id;
+  const resolvePropertyIdForSend = (): string | undefined => {
+    if (activeConversation?.propertyId) return activeConversation.propertyId;
+    if (selectedConversation?.propertyId) return selectedConversation.propertyId;
+    if (requestedPropertyId && requestedPropertyId.length > 0) return requestedPropertyId;
+    return undefined;
+  };
+
+  const ensureConversationForSend = async (): Promise<{
+    conversationId: string;
+    isNew: boolean;
+    propertyId?: string;
+  }> => {
+    if (selectedConversation && !selectedConversation.id.startsWith("pending:")) {
+      return {
+        conversationId: selectedConversation.id,
+        isNew: false,
+        propertyId: selectedConversation.propertyId ?? resolvePropertyIdForSend()
+      };
     }
 
     const recipientId = resolveRecipientIdForSend();
@@ -990,21 +1057,47 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     );
     if (existing) {
       setSelectedId(existing.id);
-      return existing.id;
+      return {
+        conversationId: existing.id,
+        isNew: false,
+        propertyId: existing.propertyId ?? resolvePropertyIdForSend()
+      };
     }
 
     const existingInDb = await findExistingConversationIdForUsers(effectiveUserId, recipientId);
     if (existingInDb) {
       setSelectedId(existingInDb);
-      return existingInDb;
+      let existingPropertyId: string | undefined;
+      try {
+        const existingSnapshot = await getDoc(doc(db, "conversations", existingInDb));
+        if (existingSnapshot.exists()) {
+          const existingData = existingSnapshot.data() as Record<string, unknown>;
+          existingPropertyId =
+            typeof existingData.propertyId === "string"
+              ? existingData.propertyId
+              : typeof existingData.property_id === "string"
+                ? existingData.property_id
+                : undefined;
+        }
+      } catch {
+        // Use fallback property source below.
+      }
+      return {
+        conversationId: existingInDb,
+        isNew: false,
+        propertyId: existingPropertyId ?? resolvePropertyIdForSend()
+      };
     }
 
     const participantIds = Array.from(new Set([effectiveUserId, recipientId]));
+    const conversationPropertyId = resolvePropertyIdForSend();
     const conversationRef = await addDoc(collection(db, "conversations"), {
       participantIds,
       participants: participantIds,
       participant1_id: participantIds[0],
       participant2_id: participantIds[1],
+      propertyId: conversationPropertyId ?? null,
+      property_id: conversationPropertyId ?? null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       created_at: serverTimestamp(),
@@ -1020,7 +1113,11 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     });
 
     setSelectedId(conversationRef.id);
-    return conversationRef.id;
+    return {
+      conversationId: conversationRef.id,
+      isNew: true,
+      propertyId: conversationPropertyId
+    };
   };
 
   const handleSendMessage = async () => {
@@ -1029,7 +1126,12 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
 
     setIsSending(true);
     try {
-      const conversationId = await ensureConversationForSend();
+      const ensuredConversation = await ensureConversationForSend();
+      const conversationId = ensuredConversation.conversationId;
+      const isFirstMessage = ensuredConversation.isNew
+        ? true
+        : !(await conversationHasMessages(conversationId));
+
       await addDoc(collection(db, "conversations", conversationId, "messages"), {
         conversation_id: conversationId,
         conversationId,
@@ -1048,14 +1150,27 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
         read: false
       });
 
-      await updateDoc(doc(db, "conversations", conversationId), {
+      const conversationPatch: Record<string, unknown> = {
         lastMessageText: text,
         last_message_text: text,
         lastMessageAt: serverTimestamp(),
         last_message_at: serverTimestamp(),
         updatedAt: serverTimestamp(),
         updated_at: serverTimestamp()
-      });
+      };
+
+      if (ensuredConversation.propertyId) {
+        conversationPatch.propertyId = ensuredConversation.propertyId;
+        conversationPatch.property_id = ensuredConversation.propertyId;
+      }
+
+      await updateDoc(doc(db, "conversations", conversationId), conversationPatch);
+
+      if (isFirstMessage && ensuredConversation.propertyId) {
+        await trackPropertyMessageStart(ensuredConversation.propertyId).catch(() => {
+          // Messaging should not fail when analytics tracking fails.
+        });
+      }
 
       setDraft("");
       const node = messagesScrollRef.current;
@@ -1124,7 +1239,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
           </button>
         </div>
 
-        <div className="mt-4 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div ref={conversationListRef} className="mt-4 flex-1 space-y-2 overflow-y-auto pr-1">
           {filteredConversations.length === 0 ? (
             <p className="rounded-lg bg-white p-3 text-sm text-slate-500">No conversations found.</p>
           ) : (
@@ -1178,6 +1293,18 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
             })
           )}
         </div>
+        {isLoadingMore ? (
+          <p className="mt-2 rounded-lg bg-white p-2 text-center text-xs text-slate-500">Loading more...</p>
+        ) : null}
+        {!isLoadingMore && hasMore ? (
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-slate-300"
+          >
+            Load older conversations
+          </button>
+        ) : null}
       </aside>
 
       <div className="flex min-h-0 flex-col bg-slate-100">
@@ -1324,3 +1451,6 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     </section>
   );
 }
+
+
+
