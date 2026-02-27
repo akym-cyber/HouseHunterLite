@@ -1307,7 +1307,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
         ) : null}
       </aside>
 
-      <div className="flex min-h-0 flex-col bg-slate-100">
+      <div className="flex min-h-0 min-w-0 flex-col bg-slate-100">
         {activeConversation ? (
           <>
             <header className="-mt-4 border-b border-slate-200 bg-white px-5 py-4">
@@ -1422,19 +1422,19 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
             </div>
 
             <footer className="border-t border-slate-200 bg-white p-4">
-              <div className="flex items-end gap-2">
+              <div className="flex min-w-0 items-end gap-2">
                 <textarea
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   rows={1}
                   placeholder="Type a message..."
-                  className="max-h-32 min-h-10 flex-1 resize-y rounded-2xl border border-slate-300 px-4 py-2 text-sm outline-none focus:border-brand-500"
+                  className="max-h-32 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border border-slate-300 px-4 py-2 text-sm outline-none focus:border-brand-500"
                 />
                 <button
                   type="button"
                   onClick={() => void handleSendMessage()}
                   disabled={!draft.trim() || isSending || !effectiveUserId}
-                  className="rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-70"
+                  className="shrink-0 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-70"
                   title="Send message"
                 >
                   {isSending ? "Sending..." : "Send"}
