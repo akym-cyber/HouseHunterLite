@@ -16,7 +16,7 @@ import {
   updateDoc,
   where
 } from "firebase/firestore";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/features/auth/store/use-auth-store";
 import { useConversations } from "@/features/chat/hooks/use-conversations";
 import { db } from "@/lib/firebase/client";
@@ -472,6 +472,7 @@ async function fetchUserProfileByUid(uid: string): Promise<UserProfile> {
 }
 
 export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const authUser = useAuthStore((state) => state.user);
   const isHydrated = useAuthStore((state) => state.isHydrated);
@@ -1376,7 +1377,10 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
                     const message = row.message;
                     const isOwnMessage = !!effectiveUserId && message.senderId === effectiveUserId;
                     const statusMeta = getMessageStatusMeta(message, effectiveUserId);
-                    const textBody = message.content.trim() || mapMessagePreviewLabel(message.messageType);
+                    const normalizedMessageType = (message.messageType ?? "").toLowerCase();
+                    const isVoiceMessage = normalizedMessageType === "audio" || normalizedMessageType === "voice";
+                    const trimmedContent = message.content.trim();
+                    const textBody = trimmedContent || mapMessagePreviewLabel(message.messageType);
 
                     return (
                       <div key={row.key} className={["flex", isOwnMessage ? "justify-end" : "justify-start"].join(" ")}>
@@ -1388,7 +1392,25 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
                               : "rounded-bl-md bg-white text-slate-700"
                           ].join(" ")}
                         >
-                          <p className="whitespace-pre-wrap break-words">{textBody}</p>
+                          {isVoiceMessage ? (
+                            <div className="rounded-xl bg-slate-100 px-3 py-2 text-slate-700">
+                              <p className="text-[13px] font-semibold leading-4 text-slate-800">
+                                {"\uD83C\uDFA4 Playback restricted"}
+                              </p>
+                              <p className="mt-1 text-xs leading-4 text-slate-600">
+                                For best experience, open in mobile app or try again later.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => router.refresh()}
+                                className="mt-2 inline-flex rounded-lg bg-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-300"
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap break-words">{textBody}</p>
+                          )}
                           <p
                             className={[
                               "mt-1 inline-flex w-full items-center justify-end gap-1 text-[11px]",
