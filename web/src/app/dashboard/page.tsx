@@ -1,6 +1,8 @@
 ﻿import { requireSession } from "@/lib/auth/require-session";
 import { OwnerListingsPanel } from "@/features/properties/components/owner-listings-panel";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const session = await requireSession("/dashboard");
 

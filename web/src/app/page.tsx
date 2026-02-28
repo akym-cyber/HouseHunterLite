@@ -2,6 +2,8 @@
 import { getPropertiesServer } from "@/features/properties/services/property-server-service";
 import type { Property } from "@/features/properties/types/property";
 
+export const revalidate = 60;
+
 const fallbackLatest: Property[] = [
   {
     id: "fallback-1",

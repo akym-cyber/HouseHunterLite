@@ -2,6 +2,8 @@
 import { SavedSearchesPanel } from "@/features/search/components/saved-searches-panel";
 import { requireSession } from "@/lib/auth/require-session";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProfilePage() {
   await requireSession("/profile");
 

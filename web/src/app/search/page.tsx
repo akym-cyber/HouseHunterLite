@@ -1,6 +1,9 @@
 ﻿import { PropertyCard } from "@/features/properties/components/property-card";
 import { getPropertiesServer } from "@/features/properties/services/property-server-service";
 import type { PropertySort } from "@/features/properties/types/property";
+import type { AppPageProps } from "@/types/app-page-props";
+
+export const dynamic = "force-dynamic";
 
 type SearchParams = {
   q?: string;
@@ -10,10 +13,6 @@ type SearchParams = {
   bathrooms?: string;
   propertyType?: string;
   sort?: string;
-};
-
-type SearchPageProps = {
-  searchParams?: Promise<SearchParams>;
 };
 
 const parseNumber = (value?: string): number | undefined => {
@@ -27,7 +26,7 @@ const parseSort = (value?: string): PropertySort => {
   return "newest";
 };
 
-export default async function SearchPage({ searchParams }: SearchPageProps) {
+export default async function SearchPage({ searchParams }: AppPageProps<Record<string, never>, SearchParams>) {
   const params = (searchParams ? await searchParams : {}) as SearchParams;
   const keyword = (params.q ?? "").trim().toLowerCase();
   const minPrice = parseNumber(params.minPrice);

@@ -2,14 +2,13 @@ import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { LoginForm } from "@/features/auth/components/login-form";
 import { verifySessionCookie } from "@/lib/auth/session";
+import type { AppPageProps } from "@/types/app-page-props";
+
+export const dynamic = "force-dynamic";
 
 type LoginSearchParams = {
   next?: string | string[];
   mode?: string | string[];
-};
-
-type LoginPageProps = {
-  searchParams?: Promise<LoginSearchParams>;
 };
 
 function sanitizeNextPath(raw: string | string[] | undefined): string {
@@ -27,8 +26,8 @@ function sanitizeMode(raw: string | string[] | undefined): "signin" | "signup" |
   return "signin";
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const resolved = await (searchParams ?? Promise.resolve({} as LoginSearchParams));
+export default async function LoginPage({ searchParams }: AppPageProps<Record<string, never>, LoginSearchParams>) {
+  const resolved = searchParams ? await searchParams : ({} as LoginSearchParams);
   const nextPath = sanitizeNextPath(resolved.next);
   const mode = sanitizeMode(resolved.mode);
   const session = await verifySessionCookie();

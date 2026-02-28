@@ -4,13 +4,13 @@ import { PropertyImageStrip } from "@/features/properties/components/property-im
 import { PropertyDetailActions } from "@/features/properties/components/property-detail-actions";
 import { TrackRecentlyViewed } from "@/features/properties/components/track-recently-viewed";
 import { TrackPropertyView } from "@/features/properties/components/track-property-view";
+import type { AppPageProps } from "@/types/app-page-props";
 
-type PropertyDetailPageProps = {
-  params: Promise<{ id: string }>;
-};
+export const revalidate = 120;
 
-export default async function PropertyDetailPage({ params }: PropertyDetailPageProps) {
-  const { id } = await params;
+export default async function PropertyDetailPage({ params }: AppPageProps<{ id: string }>) {
+  const resolvedParams = params ? await params : { id: "" };
+  const { id } = resolvedParams;
   const property = await getPropertyByIdServer(id);
 
   if (!property) {
