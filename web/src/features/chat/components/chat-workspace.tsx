@@ -1,13 +1,13 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
-  DocumentData,
   limit,
   onSnapshot,
   orderBy,
@@ -33,11 +33,6 @@ type UserProfile = {
   avatarUrl?: string;
   isOnline?: boolean;
   lastSeenAt?: number;
-};
-
-type ConversationRow = {
-  item: ReturnType<typeof buildConversationRowItem>;
-  unread: number;
 };
 
 type ChatMessage = {
@@ -283,28 +278,6 @@ function mapChatMessage(
     // Mobile-compatible read detection (is_read first, legacy status fallback).
     isRead: resolvedIsRead
   };
-}
-
-function getMessageStatusTick(
-  message: ChatMessage,
-  currentUserId: string | undefined
-): { icon: string; className: string } | null {
-  if (!currentUserId || message.senderId !== currentUserId) return null;
-
-  if (message.status === "failed") {
-    return { icon: "!", className: "text-red-400" };
-  }
-  if (message.status === "sending") {
-    return { icon: "...", className: "text-slate-300" };
-  }
-  if (message.status === "read" || message.isRead) {
-    return { icon: "âœ“âœ“", className: "text-sky-400" };
-  }
-  if (message.status === "delivered") {
-    return { icon: "âœ“âœ“", className: "text-slate-300" };
-  }
-
-  return { icon: "âœ“", className: "text-slate-300" };
 }
 
 function getMessageStatusMeta(
@@ -585,19 +558,20 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
       targetUids.push(pendingRecipientId);
     }
 
+    const presenceListeners = presenceUnsubsRef.current;
     const activeSet = new Set(targetUids);
 
     // Remove listeners no longer needed
-    for (const [uid, unsub] of presenceUnsubsRef.current.entries()) {
+    for (const [uid, unsub] of presenceListeners.entries()) {
       if (!activeSet.has(uid)) {
         unsub();
-        presenceUnsubsRef.current.delete(uid);
+        presenceListeners.delete(uid);
       }
     }
 
     // Add listeners for new UIDs
     for (const uid of targetUids) {
-      if (presenceUnsubsRef.current.has(uid)) continue;
+      if (presenceListeners.has(uid)) continue;
 
       const directRef = doc(db, "users", uid);
       const unsubDirect = onSnapshot(
@@ -625,29 +599,29 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
         }
       );
 
-      presenceUnsubsRef.current.set(uid, () => {
+      presenceListeners.set(uid, () => {
         unsubDirect();
         unsubFallback();
       });
     }
-
-    return () => {
-      // keep listeners alive while component mounted; cleanup only on unmount
-    };
   }, [conversations, effectiveUserId, pendingRecipientId]);
 
   useEffect(() => {
+    const listeners = presenceUnsubsRef.current;
     return () => {
-      for (const unsub of presenceUnsubsRef.current.values()) unsub();
-      presenceUnsubsRef.current.clear();
+      for (const unsub of listeners.values()) unsub();
+      listeners.clear();
     };
   }, []);
 
-  const getConversationLabel = (participantIds: string[]): string => {
-    const otherUid = resolveOtherParticipantId(participantIds, effectiveUserId);
-    if (!otherUid) return "Unknown user";
-    return userProfiles[otherUid]?.label ?? `User ${otherUid.slice(0, 6)}`;
-  };
+  const getConversationLabel = useCallback(
+    (participantIds: string[]): string => {
+      const otherUid = resolveOtherParticipantId(participantIds, effectiveUserId);
+      if (!otherUid) return "Unknown user";
+      return userProfiles[otherUid]?.label ?? `User ${otherUid.slice(0, 6)}`;
+    },
+    [effectiveUserId, userProfiles]
+  );
 
   const getConversationAvatarUrl = (participantIds: string[]): string | undefined => {
     const otherUid = resolveOtherParticipantId(participantIds, effectiveUserId);
@@ -738,7 +712,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
         (item.lastMessageText ?? "").toLowerCase().includes(text)
       );
     });
-  }, [dedupedConversations, filter, searchQuery, userProfiles]);
+  }, [dedupedConversations, filter, getConversationLabel, searchQuery]);
 
   const selectedConversation =
     filteredConversations.find((item) => item.id === selectedId) ?? filteredConversations[0] ?? null;
@@ -755,6 +729,9 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
     );
   }, [effectiveUserId, pendingRecipientId, requestedPropertyId]);
   const activeConversation = selectedConversation ?? pendingConversation;
+  const activeConversationAvatarUrl = activeConversation
+    ? getConversationAvatarUrl(activeConversation.participantIds)
+    : undefined;
 
   useEffect(() => {
     if (!selectedId && filteredConversations.length > 0) {
@@ -1262,7 +1239,14 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
                   <div className="flex items-start gap-3">
                     <div className="relative mt-0.5 h-10 w-10 flex-shrink-0 overflow-hidden rounded-full bg-slate-200">
                       {avatarUrl ? (
-                        <img src={avatarUrl} alt={getConversationLabel(item.participantIds)} className="h-full w-full object-cover" />
+                        <Image
+                          src={avatarUrl}
+                          alt={getConversationLabel(item.participantIds)}
+                          width={40}
+                          height={40}
+                          className="h-full w-full object-cover"
+                          unoptimized
+                        />
                       ) : (
                         <span className="inline-flex h-full w-full items-center justify-center text-sm font-semibold text-slate-600">
                           {getInitialForConversation(item.participantIds)}
@@ -1315,11 +1299,14 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
                 <div className="relative">
                   <div className="flex items-center gap-2">
                     <div className="relative mt-3.5 h-8 w-8 overflow-hidden rounded-full bg-slate-200">
-                      {getConversationAvatarUrl(activeConversation.participantIds) ? (
-                        <img
-                          src={getConversationAvatarUrl(activeConversation.participantIds)}
+                      {activeConversationAvatarUrl ? (
+                        <Image
+                          src={activeConversationAvatarUrl}
                           alt={getConversationLabel(activeConversation.participantIds)}
+                          width={32}
+                          height={32}
                           className="h-full w-full object-cover"
+                          unoptimized
                         />
                       ) : (
                         <span className="inline-flex h-full w-full items-center justify-center text-xs font-semibold text-slate-600">

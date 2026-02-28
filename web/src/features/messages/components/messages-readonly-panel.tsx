@@ -14,10 +14,6 @@ import { db } from "@/lib/firebase/client";
 import { useAuthStore } from "@/features/auth/store/use-auth-store";
 import { MobileFeaturePrompt } from "@/components/common/mobile-feature-prompt";
 
-type MessagesReadonlyPanelProps = {
-  userId: string;
-};
-
 type ConversationPreview = {
   id: string;
   participantIds: string[];
@@ -123,7 +119,7 @@ function formatUpdated(value?: number): string {
   return new Date(value).toLocaleString();
 }
 
-export function MessagesReadonlyPanel({ userId }: MessagesReadonlyPanelProps) {
+export function MessagesReadonlyPanel() {
   const authUser = useAuthStore((state) => state.user);
   const isHydrated = useAuthStore((state) => state.isHydrated);
   const effectiveUserId = authUser?.uid;
@@ -217,4 +213,3 @@ export function MessagesReadonlyPanel({ userId }: MessagesReadonlyPanelProps) {
     </div>
   );
 }
-

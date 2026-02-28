@@ -3,6 +3,8 @@
 
 # Next.js build output
 /.next
+/.next-dev
+/.next-build
 /out
 
 # Production build artifacts
@@ -30,4 +32,3 @@ pnpm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
-

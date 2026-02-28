@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 type ForgotPasswordProps = {
-  searchParams?: { next?: string | string[] } | Promise<{ next?: string | string[] }>;
+  searchParams?: Promise<{ next?: string | string[] }>;
 };
 
 function sanitizeNextPath(raw: string | string[] | undefined): string {
@@ -13,8 +13,7 @@ function sanitizeNextPath(raw: string | string[] | undefined): string {
 }
 
 export default async function ForgotPasswordPage({ searchParams }: ForgotPasswordProps) {
-  const resolved = await Promise.resolve(searchParams ?? {});
+  const resolved = searchParams ? await searchParams : {};
   const nextPath = sanitizeNextPath(resolved.next);
   redirect(`/auth/login?mode=forgot&next=${encodeURIComponent(nextPath)}`);
 }
-
