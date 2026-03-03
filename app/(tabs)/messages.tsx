@@ -505,12 +505,16 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     paddingBottom: 16,
   },
   conversationCard: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: 'transparent',
     marginBottom: 2,
-    elevation: 1,
+    elevation: 0,
     borderRadius: 8,
     padding: 6,
     position: 'relative',
+    shadowColor: '#000',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
   },
   conversationContent: {
     flexDirection: 'row',
@@ -556,7 +560,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginTop: 16,
   },
   unreadCard: {
-    backgroundColor: theme.colors.primaryContainer,
+    backgroundColor: theme.app.background,
     borderLeftWidth: 4,
     borderLeftColor: theme.colors.primary,
   },

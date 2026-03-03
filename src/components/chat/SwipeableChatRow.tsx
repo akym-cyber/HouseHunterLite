@@ -43,9 +43,9 @@ export default function SwipeableChatRow({
   );
 }
 
-const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
+const createStyles = (_theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
   row: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: 'transparent',
   },
   deleteAction: {
     backgroundColor: '#FF3B30',
