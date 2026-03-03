@@ -39,14 +39,16 @@ export function FavoritesList({ userId }: FavoritesListProps) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {favorites.map((item) => (
-        <article key={item.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <PropertyImageStrip
-            title={item.title ?? `Property ${item.propertyId}`}
-            imageUrls={Array.from(new Set([...(item.imageUrls ?? []), ...(item.coverUrl ? [item.coverUrl] : [])]))}
-            videoEntries={item.videoEntries}
-            className="rounded-none"
-          />
-          <div className="p-4">
+        <article key={item.id} className="rounded-2xl bg-transparent p-0 shadow-none">
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/80">
+            <PropertyImageStrip
+              title={item.title ?? `Property ${item.propertyId}`}
+              imageUrls={Array.from(new Set([...(item.imageUrls ?? []), ...(item.coverUrl ? [item.coverUrl] : [])]))}
+              videoEntries={item.videoEntries}
+              className="rounded-none"
+            />
+          </div>
+          <div className="mt-3 space-y-2 px-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               {item.isFeatured ? (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">

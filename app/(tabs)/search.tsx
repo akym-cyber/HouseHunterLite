@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import {
   Text,
@@ -77,12 +78,15 @@ export default function SearchScreen() {
     <Card
       key={item.id}
       style={styles.propertyCard}
+      mode="contained"
     >
-      <PropertyMediaCarousel
-        primaryImageUrl={item.primaryImageUrl}
-        media={item.media}
-        borderRadius={8}
-      />
+      <View style={styles.propertyMediaShell}>
+        <PropertyMediaCarousel
+          primaryImageUrl={item.primaryImageUrl}
+          media={item.media}
+          borderRadius={12}
+        />
+      </View>
       <TouchableOpacity
         activeOpacity={0.8}
         onPress={() => handlePropertyPress(item.id)}
@@ -368,11 +372,30 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   propertyCard: {
     marginBottom: 16,
-    elevation: 2,
-    borderRadius: 8,
+    elevation: 0,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    shadowColor: 'transparent',
+  },
+  propertyMediaShell: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.surface,
+    ...Platform.select({
+      ios: {
+        shadowColor: theme.app.shadow,
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   propertyContent: {
     padding: 16,
+    backgroundColor: 'transparent',
   },
   propertyTitle: {
     fontSize: 16,

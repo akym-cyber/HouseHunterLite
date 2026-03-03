@@ -810,7 +810,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
                 emit();
               },
               () => {
-                setMessagesError("Unable to load messages for this chat.");
+                setMessagesError("Unable to load messages for this conversation.");
               }
             );
             unsubs.push(unsubscribe);
@@ -824,7 +824,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
 
       const attached = attachLiveListener();
       if (!attached) {
-        setMessagesError("Unable to load messages for this chat.");
+        setMessagesError("Unable to load messages for this conversation.");
       }
 
       // One-time legacy fallback for root-level messages.
@@ -1165,7 +1165,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
   }
 
   if (!canQuery) {
-    return <p className="text-sm text-slate-500">Syncing secure chat session...</p>;
+    return <p className="text-sm text-slate-500">Syncing secure messages session...</p>;
   }
 
   if (isLoading) {
@@ -1190,7 +1190,7 @@ export function ChatWorkspace({ userId }: ChatWorkspaceProps) {
             type="text"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search chat or message"
+            placeholder="Search messages"
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500"
           />
         </div>

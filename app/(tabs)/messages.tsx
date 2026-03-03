@@ -263,7 +263,7 @@ export default function MessagesScreen() {
   const handleConversationLongPress = (conversation: Conversation) => {
     showMessageActions('Conversation Options', [
       {
-        label: 'Delete Chat',
+        label: 'Delete Conversation',
         onPress: () => handleDeleteConversation(conversation),
         destructive: true,
       },
@@ -289,7 +289,7 @@ export default function MessagesScreen() {
       const isUnread = lastMessageTime > 0 && (new Date().getTime() - lastMessageTime) < (1000 * 60 * 60);
 
       const propertyCount = item.propertyReferences?.length || (item.property_id ? 1 : 0);
-      const previewText = propertyCount > 1 ? `${propertyCount} properties` : 'Tap to start chatting';
+      const previewText = propertyCount > 1 ? `${propertyCount} properties` : 'Tap to start messaging';
 
       return (
         <SwipeableChatRow
@@ -365,7 +365,7 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Chats</Title>
+          <Title style={styles.headerTitle}>Messages</Title>
         </View>
         <SafeAreaView style={styles.content} edges={[]}>
           <View style={styles.loadingContainer}>
@@ -384,7 +384,7 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Chats</Title>
+          <Title style={styles.headerTitle}>Messages</Title>
         </View>
         <SafeAreaView style={styles.content} edges={[]}>
           <View style={styles.errorContainer}>
@@ -411,7 +411,7 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Title style={styles.headerTitle}>Chats</Title>
+          <Title style={styles.headerTitle}>Messages</Title>
         </View>
         <SafeAreaView style={styles.content} edges={[]}>
           <View style={styles.loadingContainer}>
@@ -430,7 +430,7 @@ export default function MessagesScreen() {
       {/* Fixed Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <Title style={styles.headerTitle}>Chats</Title>
+          <Title style={styles.headerTitle}>Messages</Title>
           {!isOnline && (
             <View style={styles.offlineIndicator}>
               <Text style={styles.offlineText}>Offline</Text>

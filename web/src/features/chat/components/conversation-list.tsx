@@ -44,7 +44,7 @@ export function ConversationList({ userId }: ConversationListProps) {
   }
 
   if (!canQuery) {
-    return <p className="text-sm text-slate-500">Syncing secure chat session...</p>;
+    return <p className="text-sm text-slate-500">Syncing secure messages session...</p>;
   }
 
   if (isLoading) {

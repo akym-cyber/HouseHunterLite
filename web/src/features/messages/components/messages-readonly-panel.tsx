@@ -179,7 +179,7 @@ export function MessagesReadonlyPanel() {
   }, [items, effectiveUserId]);
 
   if (!isHydrated) return <p className="text-sm text-slate-500">Checking session...</p>;
-  if (!canQuery) return <p className="text-sm text-slate-500">Syncing secure chat session...</p>;
+  if (!canQuery) return <p className="text-sm text-slate-500">Syncing secure messages session...</p>;
   if (isLoading) return <p className="text-sm text-slate-500">Loading messages...</p>;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
 
@@ -187,7 +187,7 @@ export function MessagesReadonlyPanel() {
     <div className="space-y-4">
       <MobileFeaturePrompt
         feature="Messaging"
-        message="Web shows your conversation history. Replying and real-time chat are available in the mobile app."
+        message="Web shows your conversation history. Replying and real-time messaging are available in the mobile app."
       />
 
       {rows.length === 0 ? (
