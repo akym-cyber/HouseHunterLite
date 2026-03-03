@@ -7,6 +7,7 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   Text,
   Card,
@@ -120,6 +121,16 @@ export default function HomeScreen() {
           <Chip icon="shower" style={styles.chip}>
             {property.bathrooms} bath
           </Chip>
+          {typeof property.squareFeet === 'number' && property.squareFeet > 0 ? (
+            <Chip
+              icon={({ size, color }) => (
+                <MaterialCommunityIcons name="set-square" size={size + 1} color={color} />
+              )}
+              style={styles.chip}
+            >
+              {property.squareFeet.toLocaleString()} sq ft
+            </Chip>
+          ) : null}
           <Chip icon="currency-usd" style={styles.chip}>
             {formatPrice(property.price, property.county || property.city)}
           </Chip>
