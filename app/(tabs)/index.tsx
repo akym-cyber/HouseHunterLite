@@ -2,11 +2,10 @@
 import {
   View,
   StyleSheet,
-  ScrollView,
   RefreshControl,
-  Alert,
   TouchableOpacity,
   Platform,
+  Animated,
 } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
@@ -27,16 +26,19 @@ import { useProperties } from '../../src/hooks/useProperties';
 import { useTheme } from '../../src/theme/useTheme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
 
 export default function HomeScreen() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { profile } = useUserProfile(user);
   const { properties, loading, refreshProperties } = useProperties();
   const [refreshing, setRefreshing] = useState(false);
   const [imageKey, setImageKey] = useState(0); // For cache busting
+  const [headerMeasuredHeight, setHeaderMeasuredHeight] = useState(0);
+  const scrollY = React.useRef(new Animated.Value(0)).current;
 
   // Refresh properties on screen focus - refetch after property creation
   useFocusEffect(
@@ -93,6 +95,30 @@ export default function HomeScreen() {
   };
 
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const resolvedHeaderHeight = headerMeasuredHeight > 0 ? headerMeasuredHeight : 126;
+  const headerStartCollapseAt = 16;
+  const headerCollapseRange = Math.max(80, resolvedHeaderHeight);
+
+  const headerAnimatedHeight = scrollY.interpolate({
+    inputRange: [0, headerStartCollapseAt, headerStartCollapseAt + headerCollapseRange],
+    outputRange: [resolvedHeaderHeight, resolvedHeaderHeight, 0],
+    extrapolate: 'clamp',
+  });
+  const headerAnimatedOpacity = scrollY.interpolate({
+    inputRange: [0, headerStartCollapseAt + 12, headerStartCollapseAt + headerCollapseRange],
+    outputRange: [1, 1, 0],
+    extrapolate: 'clamp',
+  });
+  const headerAnimatedTranslateY = scrollY.interpolate({
+    inputRange: [0, headerStartCollapseAt, headerStartCollapseAt + headerCollapseRange],
+    outputRange: [0, 0, -20],
+    extrapolate: 'clamp',
+  });
+  const pinnedDividerOpacity = scrollY.interpolate({
+    inputRange: [0, headerStartCollapseAt + headerCollapseRange * 0.8, headerStartCollapseAt + headerCollapseRange],
+    outputRange: [0, 0, 1],
+    extrapolate: 'clamp',
+  });
 
   const renderPropertyCard = (property: Property) => (
     <Card
@@ -154,38 +180,70 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Fixed Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.greeting}>{getGreeting()},</Text>
-          <Text style={styles.userName}>
-            {profile?.name || 'Guest'}
-          </Text>
-          <Chip icon="account" style={styles.roleChip}>
-            {profile?.role?.charAt(0).toUpperCase() + profile?.role?.slice(1) || 'User'}
-          </Chip>
-        </View>
-        {profile?.photoURL ? (
-          <Avatar.Image
-            key={`home-avatar-image-${profile.photoURL}-${imageKey}`}
-            size={50}
-            source={{
-              uri: getImageUrlWithCacheBust(profile.photoURL)
-            }}
-            style={styles.avatar}
-          />
-        ) : (
-          <Avatar.Text
-            key={`home-avatar-text-${profile?.uid}-${imageKey}`}
-            size={50}
-            label={profile?.name?.charAt(0) || 'G'}
-            style={styles.avatar}
-          />
-        )}
+      {/* Persistent mini top header */}
+      <View
+        style={[
+          styles.pinnedTopBar,
+          {
+            paddingTop: insets.top,
+            height: insets.top + 1,
+          },
+        ]}
+      >
+        <Animated.View style={[styles.pinnedTopBarDivider, { opacity: pinnedDividerOpacity }]} />
       </View>
+
+      {/* Fixed Header */}
+      <Animated.View style={[styles.headerShell, { height: headerAnimatedHeight, opacity: headerAnimatedOpacity }]}>
+        <Animated.View
+          style={[styles.header, { transform: [{ translateY: headerAnimatedTranslateY }] }]}
+          onLayout={(event) => {
+            const measured = Math.ceil(event.nativeEvent.layout.height);
+            if (measured > 0 && measured !== headerMeasuredHeight) {
+              setHeaderMeasuredHeight(measured);
+            }
+          }}
+        >
+          <View style={styles.headerContent}>
+            <Text style={styles.greeting}>{getGreeting()},</Text>
+            <Text style={styles.userName}>
+              {profile?.name || 'Guest'}
+            </Text>
+            <Chip icon="account" style={styles.roleChip}>
+              {profile?.role?.charAt(0).toUpperCase() + profile?.role?.slice(1) || 'User'}
+            </Chip>
+          </View>
+          {profile?.photoURL ? (
+            <Avatar.Image
+              key={`home-avatar-image-${profile.photoURL}-${imageKey}`}
+              size={50}
+              source={{
+                uri: getImageUrlWithCacheBust(profile.photoURL)
+              }}
+              style={styles.avatar}
+            />
+          ) : (
+            <Avatar.Text
+              key={`home-avatar-text-${profile?.uid}-${imageKey}`}
+              size={50}
+              label={profile?.name?.charAt(0) || 'G'}
+              style={styles.avatar}
+            />
+          )}
+        </Animated.View>
+      </Animated.View>
       {/* Screen Content */}
       <SafeAreaView style={styles.content} edges={[]}>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
+        <Animated.ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: false }
+          )}
+        >
           {/* Quick Actions */}
           <Card style={styles.quickActionsCard}>
             <Card.Content>
@@ -283,7 +341,7 @@ export default function HomeScreen() {
               </View>
             </View>
           ) : null}
-        </ScrollView>
+        </Animated.ScrollView>
         {profile?.role === 'owner' && (
           <FAB
             icon="plus"
@@ -304,13 +362,26 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   scrollView: {
     flex: 1,
   },
+  headerShell: {
+    overflow: 'hidden',
+    backgroundColor: theme.colors.primary,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    paddingTop: 40,
+    paddingTop: 16,
     backgroundColor: theme.colors.primary,
+  },
+  pinnedTopBar: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: 20,
+    justifyContent: 'flex-end',
+  },
+  pinnedTopBarDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.28)',
   },
   headerContent: {
     flex: 1,
