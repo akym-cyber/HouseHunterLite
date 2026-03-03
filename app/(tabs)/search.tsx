@@ -20,6 +20,8 @@ import {
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useProperties } from '../../src/hooks/useProperties';
+import { useAuth } from '../../src/hooks/useAuth';
+import { useUserProfile } from '../../src/hooks/useUserProfile';
 import { useTheme } from '../../src/theme/useTheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PROPERTY_TYPES, BEDROOM_OPTIONS, PRICE_RANGES, formatPrice } from '../../src/utils/constants';
@@ -41,6 +43,8 @@ const getLocationString = (item: Property) => {
 
 export default function SearchScreen() {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const { profile } = useUserProfile(user);
   const { properties, loading, searchProperties } = useProperties();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -73,6 +77,12 @@ export default function SearchScreen() {
   };
 
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const visibleProperties = useMemo(() => {
+    if (profile?.role === 'owner' && user?.uid) {
+      return properties.filter((property) => property.ownerId === user.uid);
+    }
+    return properties;
+  }, [profile?.role, user?.uid, properties]);
 
   const renderPropertyCard = ({ item }: { item: Property }) => (
     <Card
@@ -264,7 +274,7 @@ export default function SearchScreen() {
           </View>
           {showFilters && renderFilters()}
           <View style={styles.propertyList}>
-            {properties.length === 0 ? (
+            {visibleProperties.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyIcon}>🔍</Text>
                 <Title style={styles.emptyTitle}>No Properties Found</Title>
@@ -273,7 +283,7 @@ export default function SearchScreen() {
                 </Text>
               </View>
             ) : (
-              properties.map((item) => renderPropertyCard({ item }))
+              visibleProperties.map((item) => renderPropertyCard({ item }))
             )}
           </View>
         </ScrollView>

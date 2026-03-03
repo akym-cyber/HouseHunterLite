@@ -1,5 +1,6 @@
 import { 
   collection, 
+  collectionGroup,
   getDocs, 
   addDoc, 
   updateDoc, 
@@ -9,6 +10,7 @@ import {
   where, 
   orderBy, 
   limit,
+  writeBatch,
   serverTimestamp,
   Timestamp,
   DocumentData,
@@ -166,6 +168,117 @@ export const propertyHelpers = {
   // Delete property
   async deleteProperty(propertyId: string): Promise<FirestoreResponse<{ id: string }>> {
     try {
+      const BATCH_LIMIT = 400;
+
+      const commitDeleteBatch = async (refs: Array<ReturnType<typeof doc>>) => {
+        if (refs.length === 0) return;
+
+        for (let i = 0; i < refs.length; i += BATCH_LIMIT) {
+          const batch = writeBatch(db);
+          const chunk = refs.slice(i, i + BATCH_LIMIT);
+          chunk.forEach((ref) => batch.delete(ref));
+          await batch.commit();
+        }
+      };
+
+      const deleteByQueries = async (queries: Array<ReturnType<typeof query>>) => {
+        const byPath = new Map<string, ReturnType<typeof doc>>();
+        for (const q of queries) {
+          const snap = await getDocs(q);
+          snap.forEach((row) => byPath.set(row.ref.path, row.ref));
+        }
+        await commitDeleteBatch(Array.from(byPath.values()));
+      };
+
+      try {
+        const conversationSnapshots = await Promise.all([
+          getDocs(query(collection(db, 'conversations'), where('property_id', '==', propertyId))),
+          getDocs(query(collection(db, 'conversations'), where('propertyId', '==', propertyId))),
+          getDocs(query(collection(db, 'conversations'), where('propertyReferences', 'array-contains', propertyId)))
+        ]);
+
+        const conversationsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+        conversationSnapshots.forEach((snap) => {
+          snap.forEach((row) => conversationsById.set(row.id, row));
+        });
+
+        const deletedConversationIds: string[] = [];
+
+        for (const conversation of conversationsById.values()) {
+          const data = conversation.data() as Record<string, unknown>;
+          const rawRefs = Array.isArray(data.propertyReferences) ? data.propertyReferences : [];
+          const propertyRefs = rawRefs
+            .filter((item): item is string => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0);
+          const hasPropertyRef = propertyRefs.includes(propertyId);
+          const primaryPropertyId =
+            typeof data.propertyId === 'string' && data.propertyId.trim()
+              ? data.propertyId.trim()
+              : typeof data.property_id === 'string' && data.property_id.trim()
+                ? data.property_id.trim()
+                : undefined;
+          const hasDirectLink = primaryPropertyId === propertyId;
+
+          if (!hasPropertyRef && !hasDirectLink) {
+            continue;
+          }
+
+          const remainingRefs = propertyRefs.filter((id) => id !== propertyId);
+          if (remainingRefs.length > 0) {
+            const nextPrimary = remainingRefs[0];
+            const updatePayload: Record<string, unknown> = {
+              propertyReferences: remainingRefs,
+              updatedAt: serverTimestamp(),
+            };
+
+            if (hasDirectLink) {
+              updatePayload.propertyId = nextPrimary;
+              updatePayload.property_id = nextPrimary;
+            }
+
+            await updateDoc(conversation.ref, updatePayload);
+            continue;
+          }
+
+          const messagesSnap = await getDocs(collection(db, `conversations/${conversation.id}/messages`));
+          await commitDeleteBatch(messagesSnap.docs.map((row) => row.ref));
+          await deleteDoc(conversation.ref);
+          deletedConversationIds.push(conversation.id);
+        }
+
+        await deleteByQueries([
+          query(collection(db, 'applications'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'applications'), where('property_id', '==', propertyId)),
+          query(collection(db, 'viewings'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'viewings'), where('property_id', '==', propertyId)),
+          query(collection(db, 'inquiries'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'inquiries'), where('property_id', '==', propertyId)),
+          query(collection(db, 'payments'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'payments'), where('property_id', '==', propertyId)),
+          query(collection(db, 'saved_properties'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'saved_properties'), where('property_id', '==', propertyId)),
+          query(collection(db, 'favorites'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'favorites'), where('property_id', '==', propertyId)),
+          query(collection(db, 'messages'), where('propertyId', '==', propertyId)),
+          query(collection(db, 'messages'), where('property_id', '==', propertyId)),
+          query(collectionGroup(db, 'favorites'), where('propertyId', '==', propertyId)),
+          query(collectionGroup(db, 'favorites'), where('property_id', '==', propertyId)),
+        ]);
+
+        for (let i = 0; i < deletedConversationIds.length; i += 10) {
+          const ids = deletedConversationIds.slice(i, i + 10);
+          await deleteByQueries([
+            query(collection(db, 'messages'), where('conversation_id', 'in', ids)),
+            query(collection(db, 'messages'), where('conversationId', 'in', ids)),
+            query(collection(db, 'typing_indicators'), where('conversation_id', 'in', ids)),
+            query(collection(db, 'typing_indicators'), where('conversationId', 'in', ids)),
+          ]);
+        }
+      } catch (cleanupError: any) {
+        console.warn('deleteProperty: related-data cleanup was partial:', cleanupError?.message || cleanupError);
+      }
+
       const propertyRef = doc(db, COLLECTIONS.PROPERTIES, propertyId);
       await withTimeout(deleteDoc(propertyRef), 30000, 'deleteProperty');
       
@@ -304,19 +417,32 @@ export const favoriteHelpers = {
 
       const querySnapshot = await getDocs(q);
 
-      const favoriteIds: string[] = [];
-      querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-        const data = doc.data();
-        favoriteIds.push(data.property_id);
+      const favoriteDocByPropertyId = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+      querySnapshot.forEach((docSnap: QueryDocumentSnapshot<DocumentData>) => {
+        const data = docSnap.data() as { property_id?: string; propertyId?: string };
+        const propertyId =
+          (typeof data.property_id === 'string' ? data.property_id.trim() : '') ||
+          (typeof data.propertyId === 'string' ? data.propertyId.trim() : '');
+        if (!propertyId) return;
+        if (!favoriteDocByPropertyId.has(propertyId)) {
+          favoriteDocByPropertyId.set(propertyId, docSnap);
+        }
       });
 
       // Get the actual property data for each favorite
       const properties: Property[] = [];
-      for (const propertyId of favoriteIds) {
+      const staleFavoriteDocRefs: Array<QueryDocumentSnapshot<DocumentData>['ref']> = [];
+      for (const [propertyId, docSnap] of favoriteDocByPropertyId.entries()) {
         const propertyResult = await propertyHelpers.getPropertyById(propertyId);
         if (propertyResult.data) {
           properties.push(propertyResult.data);
+        } else if (propertyResult.error === 'Property not found') {
+          staleFavoriteDocRefs.push(docSnap.ref);
         }
+      }
+
+      if (staleFavoriteDocRefs.length > 0) {
+        await Promise.allSettled(staleFavoriteDocRefs.map((ref) => deleteDoc(ref)));
       }
 
       return { data: properties, error: null };

@@ -50,7 +50,7 @@ function mapFavoriteDoc(docId: string, data: Record<string, unknown>): FavoriteD
   };
 }
 
-async function hydrateFavorites(items: FavoriteDoc[]): Promise<Favorite[]> {
+async function hydrateFavorites(userId: string, items: FavoriteDoc[]): Promise<Favorite[]> {
   const dedupedByProperty = new Map<string, FavoriteDoc>();
   for (const item of items) {
     const existing = dedupedByProperty.get(item.propertyId);
@@ -64,6 +64,8 @@ async function hydrateFavorites(items: FavoriteDoc[]): Promise<Favorite[]> {
       try {
         const propertySnap = await getDoc(doc(db, "properties", item.propertyId));
         if (!propertySnap.exists()) {
+          // Auto-prune stale favorite refs pointing to deleted properties.
+          await deleteDoc(doc(db, "users", userId, "favorites", item.propertyId)).catch(() => undefined);
           return null;
         }
 
@@ -128,7 +130,7 @@ export function subscribeToFavorites(
       const mapped = snapshot.docs.map((docSnap) =>
         mapFavoriteDoc(docSnap.id, docSnap.data() as Record<string, unknown>)
       );
-      void hydrateFavorites(mapped)
+      void hydrateFavorites(userId, mapped)
         .then((items) => callback(items))
         .catch(() => callback([]));
     },

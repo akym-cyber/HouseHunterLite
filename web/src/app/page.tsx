@@ -1,8 +1,10 @@
-﻿import { HomeMarketplace } from "@/features/properties/components/home-marketplace";
+import { HomeMarketplace } from "@/features/properties/components/home-marketplace";
+import { getUserRole } from "@/features/profile/services/profile-server-service";
 import { getPropertiesServer } from "@/features/properties/services/property-server-service";
 import type { Property } from "@/features/properties/types/property";
+import { verifySessionCookie } from "@/lib/auth/session";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const fallbackLatest: Property[] = [
   {
@@ -38,15 +40,19 @@ const fallbackLatest: Property[] = [
 ];
 
 export default async function HomePage() {
-  let latest = fallbackLatest;
+  const session = await verifySessionCookie();
+  const role = session?.uid ? await getUserRole(session.uid) : "unknown";
+  const ownerIdFilter = role === "owner" && session?.uid ? session.uid : undefined;
+
+  let latest: Property[] = ownerIdFilter ? [] : fallbackLatest;
   let featured: Property[] = [];
   let verified: Property[] = [];
 
   try {
     const [liveLatest, liveFeatured, liveVerified] = await Promise.all([
-      getPropertiesServer({ max: 9, sort: "newest" }),
-      getPropertiesServer({ max: 6, onlyFeatured: true, sort: "newest" }),
-      getPropertiesServer({ max: 6, onlyVerified: true, sort: "newest" })
+      getPropertiesServer({ max: 9, sort: "newest", ownerId: ownerIdFilter }),
+      getPropertiesServer({ max: 6, onlyFeatured: true, sort: "newest", ownerId: ownerIdFilter }),
+      getPropertiesServer({ max: 6, onlyVerified: true, sort: "newest", ownerId: ownerIdFilter })
     ]);
 
     if (liveLatest.length > 0) {
@@ -55,8 +61,8 @@ export default async function HomePage() {
     featured = liveFeatured;
     verified = liveVerified;
   } catch {
-    // keep fallback cards so home still renders when env/admin config is not set yet
+    // keep fallback cards for non-owner visitors so home still renders when env/admin config is not set yet
   }
 
-  return <HomeMarketplace latest={latest} featured={featured} verified={verified} />;
+  return <HomeMarketplace latest={latest} featured={featured} verified={verified} isOwner={role === "owner"} />;
 }

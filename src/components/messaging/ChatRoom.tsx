@@ -281,10 +281,11 @@ function ChatRoom({
 
     propertyReferences.forEach((item) => {
       if (!item?.id) return;
+      if (!propertyById.has(item.id)) return;
       map.set(item.id, buildContextProperty(item.id, item));
     });
 
-    if (property?.id && !map.has(property.id)) {
+    if (property?.id && propertyById.has(property.id) && !map.has(property.id)) {
       map.set(property.id, buildContextProperty(property.id, property));
     }
 
@@ -293,6 +294,7 @@ function ChatRoom({
     if (
       typeof legacyConversationPropertyId === 'string'
       && legacyConversationPropertyId
+      && propertyById.has(legacyConversationPropertyId)
       && !map.has(legacyConversationPropertyId)
     ) {
       const legacyProperty = propertyById.get(legacyConversationPropertyId);

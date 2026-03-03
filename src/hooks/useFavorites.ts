@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { favoriteHelpers, propertyHelpers } from '../services/firebase/firebaseHelpers';
-import { Property, Favorite } from '../types/database';
+import { Property } from '../types/database';
 import { useAuth } from './useAuth';
-import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, deleteDoc, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../services/firebase/firebaseConfig';
 
 interface FavoritesState {
@@ -10,6 +10,14 @@ interface FavoritesState {
   loading: boolean;
   error: string | null;
 }
+
+const readFavoritePropertyId = (data: Record<string, unknown>): string | null => {
+  const legacy = typeof data.property_id === 'string' ? data.property_id.trim() : '';
+  if (legacy) return legacy;
+
+  const modern = typeof data.propertyId === 'string' ? data.propertyId.trim() : '';
+  return modern || null;
+};
 
 export const useFavorites = () => {
   const { user } = useAuth();
@@ -19,82 +27,113 @@ export const useFavorites = () => {
     error: null,
   });
 
-  // Store unsubscribe function for cleanup
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Real-time favorites listener
   useEffect(() => {
     if (!user) {
-      console.log('🔍 useFavorites: No user, skipping favorites listener');
-      setState(prev => ({ ...prev, favorites: [], loading: false, error: null }));
+      setState((prev) => ({ ...prev, favorites: [], loading: false, error: null }));
       return;
     }
 
     const favoritesPath = `users/${user.uid}/favorites`;
-    console.log('🔍 useFavorites: Setting up real-time favorites listener for user:', user.uid);
-    console.log('🔍 useFavorites: Using Firestore path:', favoritesPath);
-    setState(prev => ({ ...prev, loading: true, error: null }));
+    setState((prev) => ({ ...prev, loading: true, error: null }));
 
     const favoritesRef = collection(db, favoritesPath);
-    const q = query(
-      favoritesRef,
-      orderBy('created_at', 'desc')
-    );
+    const q = query(favoritesRef, orderBy('created_at', 'desc'));
 
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        console.log('🔍 useFavorites: Snapshot received, size:', snapshot.size);
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        try {
+          const dedupedRows: Array<{ propertyId: string; ref: (typeof snapshot.docs)[number]['ref'] }> = [];
+          const duplicateOrInvalidRefs: Array<(typeof snapshot.docs)[number]['ref']> = [];
+          const seenPropertyIds = new Set<string>();
 
-        const favoriteIds: string[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          console.log('🔍 useFavorites: Favorite doc:', doc.id, '-> property_id:', data.property_id);
-          favoriteIds.push(data.property_id);
-        });
+          snapshot.forEach((row) => {
+            const propertyId = readFavoritePropertyId(row.data() as Record<string, unknown>);
+            if (!propertyId) {
+              duplicateOrInvalidRefs.push(row.ref);
+              return;
+            }
 
-        console.log('🔍 useFavorites: Found favorite property IDs:', favoriteIds);
+            if (seenPropertyIds.has(propertyId)) {
+              duplicateOrInvalidRefs.push(row.ref);
+              return;
+            }
 
-        // Fetch property details for all favorites
-        const properties: Property[] = [];
-        for (const propertyId of favoriteIds) {
-          const propertyResult = await propertyHelpers.getPropertyById(propertyId);
-          if (propertyResult.data) {
-            properties.push(propertyResult.data);
-          } else {
-            console.warn('🔍 useFavorites: Property not found:', propertyId);
+            seenPropertyIds.add(propertyId);
+            dedupedRows.push({ propertyId, ref: row.ref });
+          });
+
+          const propertyResults = await Promise.all(
+            dedupedRows.map(async (row) => ({
+              row,
+              result: await propertyHelpers.getPropertyById(row.propertyId),
+            }))
+          );
+
+          const staleRows = propertyResults.filter(
+            ({ result }) => !result.data && result.error === 'Property not found'
+          );
+
+          if (staleRows.length > 0 && user?.uid) {
+            await Promise.allSettled(
+              staleRows.map(async ({ row }) => {
+                await deleteDoc(row.ref);
+
+                const savedRef = collection(db, 'saved_properties');
+                const savedByUser = await getDocs(query(savedRef, where('userId', '==', user.uid)));
+
+                const docsToDelete = new Map<string, (typeof savedByUser.docs)[number]['ref']>();
+                savedByUser.forEach((savedDoc) => {
+                  const savedData = savedDoc.data() as { propertyId?: string; property_id?: string };
+                  const savedPropertyId =
+                    (typeof savedData.propertyId === 'string' ? savedData.propertyId.trim() : '') ||
+                    (typeof savedData.property_id === 'string' ? savedData.property_id.trim() : '');
+                  if (savedPropertyId === row.propertyId) {
+                    docsToDelete.set(savedDoc.ref.path, savedDoc.ref);
+                  }
+                });
+
+                await Promise.allSettled(Array.from(docsToDelete.values()).map((ref) => deleteDoc(ref)));
+              })
+            );
+            return;
           }
+
+          if (duplicateOrInvalidRefs.length > 0) {
+            await Promise.allSettled(duplicateOrInvalidRefs.map((ref) => deleteDoc(ref)));
+          }
+
+          const properties = propertyResults
+            .map(({ result }) => result.data)
+            .filter((item): item is Property => !!item);
+
+          setState({
+            favorites: properties,
+            loading: false,
+            error: null,
+          });
+        } catch (error: any) {
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            error: 'Failed to load favorites',
+          }));
         }
-
-        console.log('🔍 useFavorites: Setting favorites state length:', properties.length);
-        setState({
-          favorites: properties, // Always replace, never mutate
-          loading: false,
-          error: null,
-        });
-
-      } catch (error: any) {
-        console.error('🔍 useFavorites: Snapshot error:', error);
-        setState(prev => ({
+      },
+      () => {
+        setState((prev) => ({
           ...prev,
           loading: false,
-          error: 'Failed to load favorites',
+          error: 'Failed to listen to favorites',
         }));
       }
-    }, (error) => {
-      console.error('🔍 useFavorites: Listener error:', error);
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        error: 'Failed to listen to favorites',
-      }));
-    });
+    );
 
-    // Store unsubscribe function for cleanup
     unsubscribeRef.current = unsubscribe;
 
-    // Cleanup function
     return () => {
-      console.log('🔍 useFavorites: Cleaning up favorites listener');
       unsubscribe();
       unsubscribeRef.current = null;
     };
@@ -115,9 +154,8 @@ export const useFavorites = () => {
         return { success: false, error: result.error };
       }
 
-      // UI will automatically update via onSnapshot listener
       return { success: true, data: result.data };
-    } catch (error: any) {
+    } catch {
       return { success: false, error: 'Failed to add to favorites' };
     }
   };
@@ -134,30 +172,25 @@ export const useFavorites = () => {
         return { success: false, error: result.error };
       }
 
-      // UI will automatically update via onSnapshot listener
       return { success: true, data: result.data };
-    } catch (error: any) {
+    } catch {
       return { success: false, error: 'Failed to remove from favorites' };
     }
   };
 
   const toggleFavorite = async (propertyId: string) => {
-    const isFavorite = state.favorites.some(fav => fav.id === propertyId);
-    
-    if (isFavorite) {
-      return await removeFromFavorites(propertyId);
-    } else {
-      return await addToFavorites(propertyId);
+    const currentlyFavorite = state.favorites.some((fav) => fav.id === propertyId);
+    if (currentlyFavorite) {
+      return removeFromFavorites(propertyId);
     }
+    return addToFavorites(propertyId);
   };
 
   const isFavorite = (propertyId: string) => {
-    return state.favorites.some(fav => fav.id === propertyId);
+    return state.favorites.some((fav) => fav.id === propertyId);
   };
 
-  // With real-time listeners, manual refresh is not needed
   const refreshFavorites = async () => {
-    console.log('🔍 useFavorites: Manual refresh called - UI updates automatically via onSnapshot');
     return { success: true };
   };
 

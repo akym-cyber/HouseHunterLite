@@ -53,6 +53,10 @@ export default function ProfileScreen() {
   const [imageKey, setImageKey] = useState(0);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const isOwner = role === 'owner';
+  const ownerProperties = useMemo(() => {
+    if (!isOwner || !user?.uid) return [];
+    return properties.filter((property) => property.ownerId === user.uid);
+  }, [isOwner, user?.uid, properties]);
 
   const tenantDirectoryCount = useMemo(() => {
     if (!isOwner) return 0;
@@ -78,7 +82,7 @@ export default function ProfileScreen() {
   }, [payments, isOwner]);
 
   const ownerStats = [
-    { label: 'Properties Listed', value: `${properties.length}` },
+    { label: 'Properties Listed', value: `${ownerProperties.length}` },
     { label: 'Active Tenants', value: `${approvedTenantsCount}` },
     { label: 'Monthly Revenue', value: monthlyRevenue > 0 ? `KES ${monthlyRevenue.toLocaleString()}` : 'KES 0' },
   ];
@@ -328,7 +332,7 @@ export default function ProfileScreen() {
                   />
                   <Divider />
                   <List.Item
-                    title={`Manage Properties (${properties.length})`}
+                    title={`Manage Properties (${ownerProperties.length})`}
                     description="Edit and update your listings"
                     left={(props) => <List.Icon {...props} icon="home-city" />}
                     onPress={handleManageProperties}
@@ -399,7 +403,7 @@ export default function ProfileScreen() {
               {isOwner ? (
                 <>
                   <List.Item
-                    title={`${properties.length} listing${properties.length === 1 ? '' : 's'} active`}
+                    title={`${ownerProperties.length} listing${ownerProperties.length === 1 ? '' : 's'} active`}
                     description="Keep listings updated for more inquiries"
                     left={(props) => <List.Icon {...props} icon="home" />}
                   />

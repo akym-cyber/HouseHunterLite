@@ -1,5 +1,7 @@
-﻿import { PropertyCard } from "@/features/properties/components/property-card";
+import { PropertyCard } from "@/features/properties/components/property-card";
+import { getUserRole } from "@/features/profile/services/profile-server-service";
 import { getPropertiesServer } from "@/features/properties/services/property-server-service";
+import { verifySessionCookie } from "@/lib/auth/session";
 import type { PropertySort } from "@/features/properties/types/property";
 import type { AppPageProps } from "@/types/app-page-props";
 
@@ -27,6 +29,10 @@ const parseSort = (value?: string): PropertySort => {
 };
 
 export default async function SearchPage({ searchParams }: AppPageProps<Record<string, never>, SearchParams>) {
+  const session = await verifySessionCookie();
+  const role = session?.uid ? await getUserRole(session.uid) : "unknown";
+  const ownerIdFilter = role === "owner" && session?.uid ? session.uid : undefined;
+
   const params = (searchParams ? await searchParams : {}) as SearchParams;
   const keyword = (params.q ?? "").trim().toLowerCase();
   const minPrice = parseNumber(params.minPrice);
@@ -38,6 +44,7 @@ export default async function SearchPage({ searchParams }: AppPageProps<Record<s
 
   const properties = await getPropertiesServer({
     max: 50,
+    ownerId: ownerIdFilter,
     minPrice,
     maxPrice,
     bedrooms,

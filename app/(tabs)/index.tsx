@@ -145,6 +145,12 @@ export default function HomeScreen() {
   );
 
   const roleContent = getRoleSpecificContent();
+  const visibleProperties = useMemo(() => {
+    if (profile?.role === 'owner' && user?.uid) {
+      return properties.filter((property) => property.ownerId === user.uid);
+    }
+    return properties;
+  }, [profile?.role, user?.uid, properties]);
 
   return (
     <View style={styles.container}>
@@ -221,9 +227,9 @@ export default function HomeScreen() {
                   <Paragraph>Loading properties...</Paragraph>
                 </Card.Content>
               </Card>
-            ) : properties.length > 0 ? (
+            ) : visibleProperties.length > 0 ? (
               <View style={styles.propertiesGrid}>
-                {properties.slice(0, 6).map(renderPropertyCard)}
+                {visibleProperties.slice(0, 6).map(renderPropertyCard)}
               </View>
             ) : (
               <Card style={styles.emptyCard}>
@@ -255,7 +261,7 @@ export default function HomeScreen() {
                 <Card style={styles.statCard}>
                   <Card.Content>
                     <Text style={styles.statNumber}>
-                      {properties.filter(p => p.status === 'available').length}
+                      {visibleProperties.filter(p => p.status === 'available').length}
                     </Text>
                     <Text style={styles.statLabel}>Available</Text>
                   </Card.Content>
@@ -263,14 +269,14 @@ export default function HomeScreen() {
                 <Card style={styles.statCard}>
                   <Card.Content>
                     <Text style={styles.statNumber}>
-                      {properties.filter(p => p.status === 'rented').length}
+                      {visibleProperties.filter(p => p.status === 'rented').length}
                     </Text>
                     <Text style={styles.statLabel}>Rented</Text>
                   </Card.Content>
                 </Card>
                 <Card style={styles.statCard}>
                   <Card.Content>
-                    <Text style={styles.statNumber}>{properties.length}</Text>
+                    <Text style={styles.statNumber}>{visibleProperties.length}</Text>
                     <Text style={styles.statLabel}>Total</Text>
                   </Card.Content>
                 </Card>

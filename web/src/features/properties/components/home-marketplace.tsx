@@ -10,9 +10,10 @@ type HomeMarketplaceProps = {
   latest: Property[];
   featured: Property[];
   verified: Property[];
+  isOwner?: boolean;
 };
 
-export function HomeMarketplace({ latest, featured, verified }: HomeMarketplaceProps) {
+export function HomeMarketplace({ latest, featured, verified, isOwner = false }: HomeMarketplaceProps) {
   const [viewMode, setViewMode] = useState<"list" | "map">("list");
 
   const mapCandidates = useMemo(() => {
@@ -92,7 +93,9 @@ export function HomeMarketplace({ latest, featured, verified }: HomeMarketplaceP
           <PropertyMap properties={mapCandidates} className="w-full" />
         ) : (
           <section className="space-y-3">
-            <h3 className="text-base font-semibold text-slate-900">Latest listings</h3>
+            <h3 className="text-base font-semibold text-slate-900">
+              {isOwner ? "Your Listings" : "Latest listings"}
+            </h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {latest.map((property) => (
                 <PropertyCard

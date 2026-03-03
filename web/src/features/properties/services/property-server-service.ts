@@ -10,6 +10,7 @@ import type {
 import { extractImageUrls, extractVideoEntries } from "@/features/properties/utils/extract-image-urls";
 
 const COLLECTION_NAME = "properties";
+const WRITE_BATCH_LIMIT = 450;
 
 const clampLimit = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
@@ -410,6 +411,114 @@ async function assertOwner(propertyId: string, ownerId: string): Promise<Firebas
   return snapshot;
 }
 
+async function commitDeleteRefs(
+  adminDb: FirebaseFirestore.Firestore,
+  refs: FirebaseFirestore.DocumentReference[]
+): Promise<number> {
+  if (refs.length === 0) return 0;
+
+  let deleted = 0;
+  for (let index = 0; index < refs.length; index += WRITE_BATCH_LIMIT) {
+    const batch = adminDb.batch();
+    const chunk = refs.slice(index, index + WRITE_BATCH_LIMIT);
+    for (const ref of chunk) {
+      batch.delete(ref);
+      deleted += 1;
+    }
+    await batch.commit();
+  }
+
+  return deleted;
+}
+
+async function deleteDocsForQueries(
+  adminDb: FirebaseFirestore.Firestore,
+  queries: FirebaseFirestore.Query[]
+): Promise<number> {
+  const byPath = new Map<string, FirebaseFirestore.DocumentReference>();
+
+  for (const q of queries) {
+    const snapshot = await q.get();
+    for (const row of snapshot.docs) {
+      byPath.set(row.ref.path, row.ref);
+    }
+  }
+
+  return commitDeleteRefs(adminDb, Array.from(byPath.values()));
+}
+
+function normalizePropertyRefs(data: Record<string, unknown>): string[] {
+  if (!Array.isArray(data.propertyReferences)) return [];
+  return data.propertyReferences
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function readPrimaryPropertyId(data: Record<string, unknown>): string | undefined {
+  if (typeof data.propertyId === "string" && data.propertyId.trim()) return data.propertyId.trim();
+  if (typeof data.property_id === "string" && data.property_id.trim()) return data.property_id.trim();
+  return undefined;
+}
+
+async function cleanConversationForDeletedProperty(
+  adminDb: FirebaseFirestore.Firestore,
+  conversationSnap: FirebaseFirestore.QueryDocumentSnapshot,
+  propertyId: string
+): Promise<{ deleted: boolean; conversationId: string }> {
+  const data = conversationSnap.data() as Record<string, unknown>;
+  const propertyRefs = normalizePropertyRefs(data);
+  const hasPropertyRef = propertyRefs.includes(propertyId);
+  const primaryPropertyId = readPrimaryPropertyId(data);
+  const hasDirectLink = primaryPropertyId === propertyId;
+
+  if (!hasPropertyRef && !hasDirectLink) {
+    return { deleted: false, conversationId: conversationSnap.id };
+  }
+
+  const remainingRefs = propertyRefs.filter((id) => id !== propertyId);
+  const nextPrimary = remainingRefs[0];
+
+  if (nextPrimary) {
+    await conversationSnap.ref.set(
+      {
+        propertyReferences: remainingRefs,
+        propertyId: hasDirectLink ? nextPrimary : (data.propertyId ?? nextPrimary),
+        property_id: hasDirectLink ? nextPrimary : (data.property_id ?? nextPrimary),
+        updatedAt: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    return { deleted: false, conversationId: conversationSnap.id };
+  }
+
+  const messagesSnap = await conversationSnap.ref.collection("messages").get();
+  await commitDeleteRefs(
+    adminDb,
+    messagesSnap.docs.map((row) => row.ref)
+  );
+  await conversationSnap.ref.delete();
+  return { deleted: true, conversationId: conversationSnap.id };
+}
+
+async function deleteLegacyConversationArtifacts(
+  adminDb: FirebaseFirestore.Firestore,
+  conversationIds: string[]
+): Promise<void> {
+  if (conversationIds.length === 0) return;
+
+  for (let i = 0; i < conversationIds.length; i += 10) {
+    const chunk = conversationIds.slice(i, i + 10);
+    await deleteDocsForQueries(adminDb, [
+      adminDb.collection("messages").where("conversation_id", "in", chunk),
+      adminDb.collection("messages").where("conversationId", "in", chunk),
+      adminDb.collection("typing_indicators").where("conversation_id", "in", chunk),
+      adminDb.collection("typing_indicators").where("conversationId", "in", chunk)
+    ]);
+  }
+}
+
 export async function updatePropertyServer(
   propertyId: string,
   ownerId: string,
@@ -436,6 +545,48 @@ export async function deletePropertyServer(propertyId: string, ownerId: string):
 
   await assertOwner(propertyId, ownerId);
   const adminDb = getAdminDb();
+
+  const conversationSnapshots = await Promise.all([
+    adminDb.collection("conversations").where("property_id", "==", propertyId).get(),
+    adminDb.collection("conversations").where("propertyId", "==", propertyId).get(),
+    adminDb.collection("conversations").where("propertyReferences", "array-contains", propertyId).get()
+  ]);
+
+  const conversationsById = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+  for (const snap of conversationSnapshots) {
+    for (const row of snap.docs) {
+      conversationsById.set(row.id, row);
+    }
+  }
+
+  const deletedConversationIds: string[] = [];
+  for (const conversation of conversationsById.values()) {
+    const result = await cleanConversationForDeletedProperty(adminDb, conversation, propertyId);
+    if (result.deleted) {
+      deletedConversationIds.push(result.conversationId);
+    }
+  }
+
+  await deleteDocsForQueries(adminDb, [
+    adminDb.collection("applications").where("propertyId", "==", propertyId),
+    adminDb.collection("applications").where("property_id", "==", propertyId),
+    adminDb.collection("viewings").where("propertyId", "==", propertyId),
+    adminDb.collection("viewings").where("property_id", "==", propertyId),
+    adminDb.collection("inquiries").where("propertyId", "==", propertyId),
+    adminDb.collection("inquiries").where("property_id", "==", propertyId),
+    adminDb.collection("payments").where("propertyId", "==", propertyId),
+    adminDb.collection("payments").where("property_id", "==", propertyId),
+    adminDb.collection("saved_properties").where("propertyId", "==", propertyId),
+    adminDb.collection("saved_properties").where("property_id", "==", propertyId),
+    adminDb.collection("favorites").where("propertyId", "==", propertyId),
+    adminDb.collection("favorites").where("property_id", "==", propertyId),
+    adminDb.collection("messages").where("propertyId", "==", propertyId),
+    adminDb.collection("messages").where("property_id", "==", propertyId),
+    adminDb.collectionGroup("favorites").where("propertyId", "==", propertyId),
+    adminDb.collectionGroup("favorites").where("property_id", "==", propertyId)
+  ]);
+
+  await deleteLegacyConversationArtifacts(adminDb, deletedConversationIds);
   await adminDb.collection(COLLECTION_NAME).doc(propertyId).delete();
 }
 
