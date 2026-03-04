@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   Text,
   Card,
@@ -39,7 +40,7 @@ const getLocationString = (item: Property) => {
 
 export default function FavoritesScreen() {
   const { theme } = useTheme();
-  const { favorites, loading, error, refreshFavorites } = useFavorites();
+  const { favorites, loading, error, refreshFavorites, toggleFavorite, isFavorite } = useFavorites();
   const [refreshing, setRefreshing] = useState(false);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
@@ -47,6 +48,10 @@ export default function FavoritesScreen() {
     setRefreshing(true);
     await refreshFavorites();
     setRefreshing(false);
+  };
+
+  const handleToggleFavorite = async (propertyId: string) => {
+    await toggleFavorite(propertyId);
   };
 
   const renderPropertyCard = ({ item }: { item: Property }) => (
@@ -60,6 +65,17 @@ export default function FavoritesScreen() {
           media={item.media}
           borderRadius={12}
         />
+        <TouchableOpacity
+          style={styles.favoriteHeartButton}
+          activeOpacity={0.8}
+          onPress={() => handleToggleFavorite(item.id)}
+        >
+          <MaterialCommunityIcons
+            name={isFavorite(item.id) ? 'heart' : 'heart-outline'}
+            size={30}
+            color="#EF4444"
+          />
+        </TouchableOpacity>
       </View>
       <TouchableOpacity
         activeOpacity={0.8}
@@ -69,12 +85,17 @@ export default function FavoritesScreen() {
         <Title style={styles.propertyTitle} numberOfLines={1}>
           {item.title}
         </Title>
-        <Text style={styles.propertyLocation} numberOfLines={1}>
-          📍 {getLocationString(item)}
-        </Text>
-        <Text style={styles.propertyPrice}>
-          {formatPrice(item.price, item.county || item.city)}
-        </Text>
+        <View style={styles.propertyLocationRow}>
+          <MaterialCommunityIcons
+            name="map-marker-outline"
+            size={15}
+            color={theme.colors.onSurfaceVariant}
+            style={styles.propertyLocationIcon}
+          />
+          <Text style={styles.propertyLocation} numberOfLines={1}>
+            {getLocationString(item)}
+          </Text>
+        </View>
         <View style={styles.propertyDetails}>
           <Chip icon="bed" style={styles.chip}>
             {item.bedrooms} bed
@@ -82,11 +103,24 @@ export default function FavoritesScreen() {
           <Chip icon="shower" style={styles.chip}>
             {item.bathrooms} bath
           </Chip>
+          {typeof item.squareFeet === 'number' && item.squareFeet > 0 ? (
+            <Chip
+              icon={({ size, color }) => (
+                <MaterialCommunityIcons name="set-square" size={size + 1} color={color} />
+              )}
+              style={styles.chip}
+            >
+              {item.squareFeet.toLocaleString()} sq ft
+            </Chip>
+          ) : null}
           {item.petFriendly && (
             <Chip icon="paw" style={styles.chip}>
               Pet Friendly
             </Chip>
           )}
+          <Chip style={[styles.chip, styles.priceChip]} textStyle={styles.priceChipText}>
+            {formatPrice(item.price, item.county || item.city)}
+          </Chip>
         </View>
       </Card.Content>
       </TouchableOpacity>
@@ -168,9 +202,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   propertyList: {
     padding: 20,
     paddingTop: 16,
+    gap: 6,
   },
   propertyCard: {
-    marginBottom: 16,
+    marginBottom: 0,
     elevation: 0,
     borderRadius: 12,
     backgroundColor: 'transparent',
@@ -192,8 +227,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
       },
     }),
   },
+  favoriteHeartButton: {
+    position: 'absolute',
+    right: 10,
+    top: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   propertyContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 6,
     backgroundColor: 'transparent',
   },
   propertyTitle: {
@@ -203,21 +248,40 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   propertyLocation: {
     color: theme.colors.onSurfaceVariant,
-    marginBottom: 4,
+    flexShrink: 1,
   },
-  propertyPrice: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: theme.colors.primary,
+  propertyLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
+  },
+  propertyLocationIcon: {
+    marginRight: 4,
   },
   propertyDetails: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 3,
     flexWrap: 'wrap',
+    marginLeft: -6,
   },
   chip: {
-    marginRight: 8,
+    marginRight: 0,
+    backgroundColor: theme.app.background,
+    borderColor: 'transparent',
+  },
+  priceChip: {
+    marginLeft: 0,
+    transform: [{ translateX: -16 }],
+    backgroundColor: theme.app.background,
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  priceChipText: {
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: 0.25,
+    color: theme.colors.onSurface,
   },
   emptyContainer: {
     alignItems: 'center',

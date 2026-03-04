@@ -26,12 +26,14 @@ export const useFavorites = () => {
     loading: true,
     error: null,
   });
+  const [optimisticFavoriteMap, setOptimisticFavoriteMap] = useState<Record<string, boolean>>({});
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!user) {
       setState((prev) => ({ ...prev, favorites: [], loading: false, error: null }));
+      setOptimisticFavoriteMap({});
       return;
     }
 
@@ -109,6 +111,22 @@ export const useFavorites = () => {
             .map(({ result }) => result.data)
             .filter((item): item is Property => !!item);
 
+          const confirmedFavoriteIds = new Set(properties.map((item) => item.id));
+          setOptimisticFavoriteMap((prev) => {
+            let changed = false;
+            const next: Record<string, boolean> = { ...prev };
+
+            Object.entries(prev).forEach(([propertyId, targetFavoriteState]) => {
+              const hasFavoriteInSnapshot = confirmedFavoriteIds.has(propertyId);
+              if (hasFavoriteInSnapshot === targetFavoriteState) {
+                delete next[propertyId];
+                changed = true;
+              }
+            });
+
+            return changed ? next : prev;
+          });
+
           setState({
             favorites: properties,
             loading: false,
@@ -179,14 +197,36 @@ export const useFavorites = () => {
   };
 
   const toggleFavorite = async (propertyId: string) => {
-    const currentlyFavorite = state.favorites.some((fav) => fav.id === propertyId);
-    if (currentlyFavorite) {
-      return removeFromFavorites(propertyId);
+    const hasOptimisticValue = Object.prototype.hasOwnProperty.call(optimisticFavoriteMap, propertyId);
+    const currentlyFavorite = hasOptimisticValue
+      ? optimisticFavoriteMap[propertyId]
+      : state.favorites.some((fav) => fav.id === propertyId);
+    const nextFavoriteState = !currentlyFavorite;
+
+    setOptimisticFavoriteMap((prev) => ({
+      ...prev,
+      [propertyId]: nextFavoriteState,
+    }));
+
+    const result = currentlyFavorite
+      ? await removeFromFavorites(propertyId)
+      : await addToFavorites(propertyId);
+
+    if (!result.success) {
+      setOptimisticFavoriteMap((prev) => {
+        const next = { ...prev };
+        delete next[propertyId];
+        return next;
+      });
     }
-    return addToFavorites(propertyId);
+
+    return result;
   };
 
   const isFavorite = (propertyId: string) => {
+    if (Object.prototype.hasOwnProperty.call(optimisticFavoriteMap, propertyId)) {
+      return optimisticFavoriteMap[propertyId];
+    }
     return state.favorites.some((fav) => fav.id === propertyId);
   };
 

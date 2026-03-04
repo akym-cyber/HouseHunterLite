@@ -31,11 +31,10 @@ import { useApplications } from '../../src/hooks/useApplications';
 import { applicationHelpers, propertyHelpers } from '../../src/services/firebase/firebaseHelpers';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
-import { Video, ResizeMode } from 'expo-av';
+import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
 
 const { width } = Dimensions.get('window');
 const mediaWidth = Math.max(0, width - 32);
-const mediaHeight = Math.round(mediaWidth * 4 / 3);
 
 export default function PropertyDetailsScreen() {
   const { theme } = useTheme();
@@ -442,49 +441,14 @@ export default function PropertyDetailsScreen() {
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           {/* Media Gallery */}
           <View style={styles.imageContainer}>
-          {property.primaryImageUrl || property.media?.length ? (
-            property.media && property.media.length > 0 ? (
-              <ScrollView
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                snapToInterval={mediaWidth}
-                snapToAlignment="start"
-                decelerationRate="fast"
-                style={{ width: mediaWidth }}
-              >
-                {property.media.map((m, idx) => (
-                  <View key={idx} style={{ width: mediaWidth }}>
-                    {m.type === 'image' ? (
-                      <Card.Cover
-                        source={{ uri: m.url }}
-                        style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Video
-                        source={{ uri: m.url }}
-                        style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
-                        resizeMode={ResizeMode.COVER}
-                        useNativeControls
-                        shouldPlay
-                        isMuted={false}
-                        onError={(error) => console.log('Video error:', error)}
-                      />
-                    )}
-                  </View>
-                ))}
-              </ScrollView>
-            ) : (
-              <Card.Cover
-                source={{ uri: property.primaryImageUrl! }}
-                style={[styles.mainImage, { width: mediaWidth, height: mediaHeight }]}
-                resizeMode="cover"
+            <View style={[styles.imageCarouselShell, { width: mediaWidth }]}>
+              <PropertyMediaCarousel
+                primaryImageUrl={property.primaryImageUrl}
+                media={property.media}
+                borderRadius={8}
+                onImageDoubleTap={handleToggleFavorite}
               />
-            )
-          ) : (
-            <View style={[styles.imagePlaceholder, { width: mediaWidth, height: mediaHeight }]} />
-          )}
+            </View>
           <IconButton
             icon={isFavorite(property.id) ? 'heart' : 'heart-outline'}
             iconColor={isFavorite(property.id) ? theme.app.favoriteActive : theme.app.iconOnDark}
@@ -747,19 +711,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     alignItems: 'center',
     paddingHorizontal: 0,
   },
-  imagePlaceholder: {
-    backgroundColor: theme.app.background,
-    borderRadius: 8,
-  },
-  mainImage: {
+  imageCarouselShell: {
     borderRadius: 8,
     overflow: 'hidden',
   },
   favoriteButton: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: theme.app.overlayMedium,
+    top: 6,
+    right: 14,
+    margin: 0,
+    transform: [{ translateY: -8 }],
+    backgroundColor: 'transparent',
+    borderRadius: 0,
   },
   card: {
     margin: 16,

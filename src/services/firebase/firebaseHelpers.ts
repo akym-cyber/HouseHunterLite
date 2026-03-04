@@ -458,6 +458,24 @@ export const favoriteHelpers = {
       const favoritesPath = `users/${favoriteData.userId}/favorites`;
 
       const favoritesRef = collection(db, favoritesPath);
+      const existingSnapshot = await getDocs(
+        query(favoritesRef, where('property_id', '==', favoriteData.propertyId))
+      );
+      const existingModernSnapshot = await getDocs(
+        query(favoritesRef, where('propertyId', '==', favoriteData.propertyId))
+      );
+      if (!existingSnapshot.empty || !existingModernSnapshot.empty) {
+        return {
+          data: {
+            id: existingSnapshot.docs[0]?.id ?? existingModernSnapshot.docs[0]?.id ?? '',
+            user_id: favoriteData.userId,
+            property_id: favoriteData.propertyId,
+            created_at: new Date().toISOString(),
+          } as Favorite,
+          error: null,
+        };
+      }
+
       const docRef = await addDoc(favoritesRef, {
         property_id: favoriteData.propertyId,
         created_at: serverTimestamp()
@@ -491,26 +509,44 @@ export const favoriteHelpers = {
   async removeFavorite(userId: string, propertyId: string): Promise<FirestoreResponse<{ id: string }>> {
     try {
       const favoritesRef = collection(db, `users/${userId}/favorites`);
-      const q = query(favoritesRef, where('property_id', '==', propertyId));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const docRef = querySnapshot.docs[0];
-        await deleteDoc(docRef.ref);
-      }
+      const legacyQuery = query(favoritesRef, where('property_id', '==', propertyId));
+      const modernQuery = query(favoritesRef, where('propertyId', '==', propertyId));
+      const [legacySnapshot, modernSnapshot] = await Promise.all([
+        getDocs(legacyQuery),
+        getDocs(modernQuery),
+      ]);
+
+      const favoriteDocsByPath = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+      legacySnapshot.forEach((row) => favoriteDocsByPath.set(row.ref.path, row));
+      modernSnapshot.forEach((row) => favoriteDocsByPath.set(row.ref.path, row));
+      await Promise.allSettled(
+        Array.from(favoriteDocsByPath.values()).map((row) => deleteDoc(row.ref))
+      );
 
       const savedRef = collection(db, COLLECTIONS.SAVED_PROPERTIES);
-      const savedQuery = query(
+      const savedModernQuery = query(
         savedRef,
         where('userId', '==', userId),
         where('propertyId', '==', propertyId)
       );
-      const savedSnapshot = await getDocs(savedQuery);
-      if (!savedSnapshot.empty) {
-        await deleteDoc(savedSnapshot.docs[0].ref);
-      }
+      const savedLegacyQuery = query(
+        savedRef,
+        where('userId', '==', userId),
+        where('property_id', '==', propertyId)
+      );
+      const [savedModernSnapshot, savedLegacySnapshot] = await Promise.all([
+        getDocs(savedModernQuery),
+        getDocs(savedLegacyQuery),
+      ]);
+      const savedDocsByPath = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+      savedModernSnapshot.forEach((row) => savedDocsByPath.set(row.ref.path, row));
+      savedLegacySnapshot.forEach((row) => savedDocsByPath.set(row.ref.path, row));
+      await Promise.allSettled(
+        Array.from(savedDocsByPath.values()).map((row) => deleteDoc(row.ref))
+      );
 
-      return { data: querySnapshot.empty ? null : { id: querySnapshot.docs[0].id }, error: null };
+      const deletedFavoriteDoc = Array.from(favoriteDocsByPath.values())[0];
+      return { data: deletedFavoriteDoc ? { id: deletedFavoriteDoc.id } : null, error: null };
     } catch (error: any) {
       console.error('Error removing favorite:', error);
       return { data: null, error: error.message };

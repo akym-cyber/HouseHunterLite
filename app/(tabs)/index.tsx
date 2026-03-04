@@ -23,11 +23,25 @@ import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useUserProfile } from '../../src/hooks/useUserProfile';
 import { useProperties } from '../../src/hooks/useProperties';
+import { useFavorites } from '../../src/hooks/useFavorites';
 import { useTheme } from '../../src/theme/useTheme';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
+
+const getLocationString = (item: Property) => {
+  // Match Search/Favorites location hierarchy: Estate, County, Kenya
+  if (item.estate && item.county) {
+    return `${item.estate}, ${item.county}, Kenya`;
+  } else if (item.county) {
+    return `${item.county}, Kenya`;
+  } else if (item.city && item.state) {
+    return `${item.city}, ${item.state}`;
+  } else {
+    return `${item.city || 'Unknown Location'}, Kenya`;
+  }
+};
 
 export default function HomeScreen() {
   const { theme } = useTheme();
@@ -35,6 +49,7 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { profile } = useUserProfile(user);
   const { properties, loading, refreshProperties } = useProperties();
+  const { toggleFavorite, isFavorite } = useFavorites();
   const [refreshing, setRefreshing] = useState(false);
   const [imageKey, setImageKey] = useState(0); // For cache busting
   const [headerMeasuredHeight, setHeaderMeasuredHeight] = useState(0);
@@ -67,6 +82,10 @@ export default function HomeScreen() {
 
   const handleViewProperty = (propertyId: string) => {
     router.push(`/property/${propertyId}`);
+  };
+
+  const handleToggleFavorite = async (propertyId: string) => {
+    await toggleFavorite(propertyId);
   };
 
   const getGreeting = () => {
@@ -131,7 +150,19 @@ export default function HomeScreen() {
           primaryImageUrl={property.primaryImageUrl}
           media={property.media}
           borderRadius={12}
+          onImageDoubleTap={() => handleToggleFavorite(property.id)}
         />
+        <TouchableOpacity
+          style={styles.favoriteHeartButton}
+          activeOpacity={0.8}
+          onPress={() => handleToggleFavorite(property.id)}
+        >
+          <MaterialCommunityIcons
+            name={isFavorite(property.id) ? 'heart' : 'heart-outline'}
+            size={30}
+            color={isFavorite(property.id) ? theme.app.favoriteActive : theme.app.iconOnDark}
+          />
+        </TouchableOpacity>
       </View>
       <TouchableOpacity
         activeOpacity={0.8}
@@ -149,7 +180,7 @@ export default function HomeScreen() {
             style={styles.propertyLocationIcon}
           />
           <Paragraph style={styles.propertyLocation} numberOfLines={1}>
-            {property.city}, {property.state}
+            {getLocationString(property)}
           </Paragraph>
         </View>
         <View style={styles.propertyDetails}>
@@ -169,7 +200,7 @@ export default function HomeScreen() {
               {property.squareFeet.toLocaleString()} sq ft
             </Chip>
           ) : null}
-          <Chip style={styles.chip}>
+          <Chip style={[styles.chip, styles.priceChip]} textStyle={styles.priceChipText}>
             {formatPrice(property.price, property.county || property.city)}
           </Chip>
         </View>
@@ -441,10 +472,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     marginTop: 8,
   },
   propertiesGrid: {
-    gap: 16,
+    gap: 6,
   },
   propertyCard: {
-    marginBottom: 16,
+    marginBottom: 0,
     elevation: 0,
     borderRadius: 12,
     backgroundColor: 'transparent',
@@ -466,8 +497,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
       },
     }),
   },
+  favoriteHeartButton: {
+    position: 'absolute',
+    right: 10,
+    top: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   propertyContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 6,
     backgroundColor: 'transparent',
   },
   propertyTitle: {
@@ -489,11 +530,28 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   propertyDetails: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 3,
     flexWrap: 'wrap',
+    marginLeft: -6,
   },
   chip: {
-    marginRight: 8,
+    marginRight: 0,
+    backgroundColor: theme.app.background,
+    borderColor: 'transparent',
+  },
+  priceChip: {
+    marginLeft: 0,
+    transform: [{ translateX: -16 }],
+    backgroundColor: theme.app.background,
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  priceChipText: {
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: 0.25,
+    color: theme.colors.onSurface,
   },
   loadingCard: {
     padding: 40,

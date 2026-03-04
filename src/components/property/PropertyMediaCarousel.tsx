@@ -10,6 +10,7 @@ import {
   Modal,
   TouchableOpacity,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ interface PropertyMediaCarouselProps {
   primaryImageUrl?: string;
   media?: PropertyMedia[];
   borderRadius?: number;
+  onImageDoubleTap?: () => void;
 }
 
 const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/600x400?text=Property+Image';
@@ -33,6 +35,7 @@ const PropertyMediaCarousel: React.FC<PropertyMediaCarouselProps> = ({
   primaryImageUrl,
   media,
   borderRadius = 8,
+  onImageDoubleTap,
 }) => {
   const { theme } = useTheme();
   const [containerWidth, setContainerWidth] = useState<number>(FALLBACK_WIDTH);
@@ -40,7 +43,10 @@ const PropertyMediaCarousel: React.FC<PropertyMediaCarouselProps> = ({
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [showLikePulse, setShowLikePulse] = useState(false);
   const videoRef = useRef<any>(null);
+  const lastImageTapAtRef = useRef(0);
+  const likePulseAnim = useRef(new Animated.Value(0)).current;
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const slides = useMemo(() => {
@@ -158,6 +164,34 @@ const PropertyMediaCarousel: React.FC<PropertyMediaCarouselProps> = ({
     });
   }, []);
 
+  const triggerLikePulse = useCallback(() => {
+    setShowLikePulse(true);
+    likePulseAnim.stopAnimation();
+    likePulseAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(likePulseAnim, {
+        toValue: 1,
+        duration: 130,
+        useNativeDriver: true,
+      }),
+      Animated.timing(likePulseAnim, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start(() => setShowLikePulse(false));
+  }, [likePulseAnim]);
+
+  const handleImageTap = useCallback(() => {
+    if (!onImageDoubleTap) return;
+    const now = Date.now();
+    const isDoubleTap = now - lastImageTapAtRef.current <= 260;
+    lastImageTapAtRef.current = now;
+    if (!isDoubleTap) return;
+    onImageDoubleTap();
+    triggerLikePulse();
+  }, [onImageDoubleTap, triggerLikePulse]);
+
   return (
     <View
       style={[
@@ -217,7 +251,13 @@ const PropertyMediaCarousel: React.FC<PropertyMediaCarouselProps> = ({
                   {content}
                 </TouchableOpacity>
               ) : (
-                content
+                <TouchableOpacity
+                  activeOpacity={1}
+                  style={styles.slideTouchable}
+                  onPress={handleImageTap}
+                >
+                  {content}
+                </TouchableOpacity>
               )}
             </View>
           );
@@ -244,6 +284,28 @@ const PropertyMediaCarousel: React.FC<PropertyMediaCarouselProps> = ({
             {activeIndex + 1}/{slides.length}
           </Text>
         </View>
+      )}
+
+      {showLikePulse && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.likePulseOverlay,
+            {
+              opacity: likePulseAnim,
+              transform: [
+                {
+                  scale: likePulseAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.7, 1.15],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Ionicons name="heart" size={64} color={theme.app.favoriteActive} />
+        </Animated.View>
       )}
 
       <Modal
@@ -379,7 +441,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   counterBadge: {
     position: 'absolute',
     top: 10,
-    right: 10,
+    left: 10,
     backgroundColor: theme.app.mediaCounterBackground,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -389,6 +451,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     color: theme.app.iconOnDark,
     fontSize: 12,
     fontWeight: '600',
+  },
+  likePulseOverlay: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    marginLeft: -32,
+    marginTop: -32,
+    zIndex: 5,
   },
 });
 
