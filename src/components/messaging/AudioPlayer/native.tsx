@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../../theme/useTheme';
 import { AudioPlayerProps } from './types';
 import { ensurePlaybackAudioMode } from '../audioMode';
+import VoiceWaveform from '../VoiceWaveform';
 
 const resolveFormat = (
   format?: 'm4a' | 'webm',
@@ -70,18 +71,6 @@ const AudioPlayerNative: React.FC<AudioPlayerProps> = ({
   );
   const isPlayable = hasRemoteUrl && !isFailed && isSupportedFormat;
   const showUnsupported = hasRemoteUrl && !isFailed && !isUploading && !isSupportedFormat;
-
-  const bars = useMemo(() => {
-    if (waveform && waveform.length > 0) {
-      const slice = waveform.slice(0, 32);
-      const max = Math.max(...slice.map(value => Math.abs(value)), 1);
-      return slice.map(value => {
-        const normalized = Math.abs(value) / max;
-        return Math.min(Math.max(normalized, 0), 1);
-      });
-    }
-    return Array.from({ length: 32 }, () => 0.4);
-  }, [waveform]);
 
   const totalDuration = durationMillis || (duration ? duration * 1000 : 0);
   const progressRatio = totalDuration > 0 ? Math.min(positionMillis / totalDuration, 1) : 0;
@@ -289,23 +278,14 @@ const AudioPlayerNative: React.FC<AudioPlayerProps> = ({
         ) : null}
 
         <View style={[styles.waveform, { minWidth: waveformWidth }]}>
-          {bars.map((value, index) => {
-            const active = index / bars.length <= progressRatio;
-            return (
-              <View
-                key={`${index}`}
-                style={[
-                  styles.waveformBar,
-                  {
-                    height: 10 + Math.round(value * 18),
-                    backgroundColor: active
-                      ? (isOwnMessage ? theme.colors.onPrimary : theme.colors.primary)
-                      : (isOwnMessage ? theme.app.chatBubbleSentMeta : theme.app.chatBubbleReceivedMeta),
-                  }
-                ]}
-              />
-            );
-          })}
+          <VoiceWaveform
+            audioUri={remoteUrl ?? ''}
+            duration={Math.round(totalDuration / 1000)}
+            isPlaying={isPlaying}
+            progress={progressRatio}
+            isSender={isOwnMessage}
+            amplitudes={waveform}
+          />
         </View>
 
         {isUploading ? (
@@ -427,17 +407,11 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   waveform: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2.5,
-    minHeight: 30,
+    alignItems: 'flex-start',
+    minHeight: 26,
     flexShrink: 0,
     paddingLeft: 14,
-    paddingTop: 16,
-  },
-  waveformBar: {
-    width: 2.2,
-    borderRadius: 2,
+    paddingTop: 12,
   },
   metaRow: {
     flexDirection: 'row',

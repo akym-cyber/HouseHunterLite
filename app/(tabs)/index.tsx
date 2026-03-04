@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -95,9 +95,9 @@ export default function HomeScreen() {
   };
 
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const resolvedHeaderHeight = headerMeasuredHeight > 0 ? headerMeasuredHeight : 126;
-  const headerStartCollapseAt = 16;
-  const headerCollapseRange = Math.max(80, resolvedHeaderHeight);
+  const resolvedHeaderHeight = headerMeasuredHeight > 0 ? headerMeasuredHeight : 184;
+  const headerStartCollapseAt = 24;
+  const headerCollapseRange = Math.max(96, resolvedHeaderHeight);
 
   const headerAnimatedHeight = scrollY.interpolate({
     inputRange: [0, headerStartCollapseAt, headerStartCollapseAt + headerCollapseRange],
@@ -105,13 +105,13 @@ export default function HomeScreen() {
     extrapolate: 'clamp',
   });
   const headerAnimatedOpacity = scrollY.interpolate({
-    inputRange: [0, headerStartCollapseAt + 12, headerStartCollapseAt + headerCollapseRange],
+    inputRange: [0, headerStartCollapseAt, headerStartCollapseAt + Math.min(72, headerCollapseRange * 0.6)],
     outputRange: [1, 1, 0],
     extrapolate: 'clamp',
   });
   const headerAnimatedTranslateY = scrollY.interpolate({
     inputRange: [0, headerStartCollapseAt, headerStartCollapseAt + headerCollapseRange],
-    outputRange: [0, 0, -20],
+    outputRange: [0, 0, -26],
     extrapolate: 'clamp',
   });
   const pinnedDividerOpacity = scrollY.interpolate({
@@ -141,9 +141,17 @@ export default function HomeScreen() {
         <Title style={styles.propertyTitle} numberOfLines={1}>
           {property.title}
         </Title>
-        <Paragraph style={styles.propertyLocation} numberOfLines={1}>
-          📍 {property.city}, {property.state}
-        </Paragraph>
+        <View style={styles.propertyLocationRow}>
+          <MaterialCommunityIcons
+            name="map-marker-outline"
+            size={15}
+            color={theme.colors.onSurfaceVariant}
+            style={styles.propertyLocationIcon}
+          />
+          <Paragraph style={styles.propertyLocation} numberOfLines={1}>
+            {property.city}, {property.state}
+          </Paragraph>
+        </View>
         <View style={styles.propertyDetails}>
           <Chip icon="bed" style={styles.chip}>
             {property.bedrooms} bed
@@ -161,7 +169,7 @@ export default function HomeScreen() {
               {property.squareFeet.toLocaleString()} sq ft
             </Chip>
           ) : null}
-          <Chip icon="currency-usd" style={styles.chip}>
+          <Chip style={styles.chip}>
             {formatPrice(property.price, property.county || property.city)}
           </Chip>
         </View>
@@ -199,7 +207,7 @@ export default function HomeScreen() {
           style={[styles.header, { transform: [{ translateY: headerAnimatedTranslateY }] }]}
           onLayout={(event) => {
             const measured = Math.ceil(event.nativeEvent.layout.height);
-            if (measured > 0 && measured !== headerMeasuredHeight) {
+            if (measured > headerMeasuredHeight) {
               setHeaderMeasuredHeight(measured);
             }
           }}
@@ -469,7 +477,15 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   propertyLocation: {
     color: theme.colors.onSurfaceVariant,
+    flexShrink: 1,
+  },
+  propertyLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
+  },
+  propertyLocationIcon: {
+    marginRight: 4,
   },
   propertyDetails: {
     flexDirection: 'row',
@@ -545,6 +561,9 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     flex: 1,
   },
 });
+
+
+
 
 
 

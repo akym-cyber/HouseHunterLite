@@ -12,6 +12,7 @@ import {
   Animated,
   Dimensions,
   Keyboard,
+  AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -34,13 +35,20 @@ import { Message, MessageMedia } from '../../types/database';
 import { buildVoiceWaveform } from './useVoiceRecording';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const LIVE_WAVE_BAR_COUNT = 16;
+const LIVE_WAVE_BAR_COUNT = 20;
 const MAX_SLIDE_DISTANCE = 120;
 const SLIDE_CANCEL_THRESHOLD = -64;
 const DELETE_ABSORB_DURATION_MS = 200;
-const METER_MIN_DB = -55;
-const METER_MAX_DB = -5;
-const WAVE_RESPONSE_ALPHA = 0.62;
+const METER_MIN_DB = -70;
+const METER_MAX_DB = -6;
+const WAVE_ATTACK_ALPHA = 0.82;
+const WAVE_RELEASE_ALPHA = 0.24;
+const IG_RECORDING_PROFILE_TEMPLATE = [
+  0.18, 0.24, 0.32, 0.44, 0.58, 0.7, 0.62, 0.5, 0.38, 0.3, 0.24, 0.2,
+  0.24, 0.34, 0.46, 0.6, 0.72, 0.64, 0.52, 0.4,
+];
+const WEB_ANALYSER_POLL_MS = 33;
+const WEB_ANALYSER_METER_FALLBACK_AFTER_MS = 180;
 const FAST_RECORDING_OPTIONS = {
   ...Audio.RecordingOptionsPresets.LOW_QUALITY,
   keepAudioActiveHint: true,
@@ -165,11 +173,20 @@ function ChatInputBar({
   const recordingWarmupWaveTimerRef = useRef<number | null>(null);
   const recordingDurationRef = useRef(0);
   const isMountedRef = useRef(true);
+  const appStateRef = useRef(AppState.currentState);
   const isPreparingRef = useRef(false);
   const isStartingRecordingRef = useRef(false);
   const isRecordingUiRef = useRef(false);
   const isMicPressActiveRef = useRef(false);
   const hasMeteringSampleRef = useRef(false);
+  const lastMeteringTickMsRef = useRef(0);
+  const lastLiveWaveLevelRef = useRef(0.12);
+  const wavePeakHoldRef = useRef(0);
+  const webAudioContextRef = useRef<any>(null);
+  const webAnalyserRef = useRef<any>(null);
+  const webMicSourceRef = useRef<any>(null);
+  const webMicStreamRef = useRef<any>(null);
+  const webAnalyserTimerRef = useRef<number | null>(null);
   const pendingGestureFinalizeRef = useRef<boolean | null>(null);
   const pendingStopDiscardRef = useRef<boolean | null>(null);
   const isSlideToCancelArmedRef = useRef(false);
@@ -199,13 +216,16 @@ function ChatInputBar({
       liveWaveform.map((level, index, allLevels) => {
         const prev = allLevels[index - 1] ?? level;
         const next = allLevels[index + 1] ?? level;
-        const smoothedLevel = clampNumber((prev + level * 2 + next) / 4, 0, 1);
-        const width = 2.4 + smoothedLevel * 1.2;
+        const smoothedLevel = clampNumber((prev * 0.26 + level * 0.48 + next * 0.26), 0, 1);
+        const shapedLevel = Math.pow(smoothedLevel, 0.64);
+        const profileLevel = IG_RECORDING_PROFILE_TEMPLATE[index % IG_RECORDING_PROFILE_TEMPLATE.length] ?? 0.4;
+        const blendedLevel = clampNumber(profileLevel * 0.58 + shapedLevel * 0.42, 0.12, 1);
+        const width = 1.75 + blendedLevel * 0.25;
         return {
-          height: 4 + smoothedLevel * 36,
-          opacity: 0.32 + smoothedLevel * 0.68,
+          height: 4.4 + blendedLevel * 10.4,
+          opacity: 0.5 + blendedLevel * 0.32,
           width,
-          borderRadius: width / 2,
+          borderRadius: 2,
         };
       }),
     [liveWaveform]
@@ -315,15 +335,144 @@ function ChatInputBar({
     };
   });
 
-  const normalizeMetering = useCallback((metering?: number): number => {
-    if (typeof metering !== 'number') {
-      return 0;
+  const normalizeMetering = useCallback((metering?: number): number | null => {
+    if (typeof metering !== 'number' || !Number.isFinite(metering)) {
+      return null;
     }
     const clampedDb = Math.max(METER_MIN_DB, Math.min(METER_MAX_DB, metering));
     const raw = (clampedDb - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
-    const shaped = Math.pow(raw, 0.9);
-    return clampNumber(shaped, 0, 1);
+    const shaped = Math.pow(raw, 1.35);
+    const gated = shaped < 0.03 ? 0 : shaped;
+    return clampNumber(gated, 0, 1);
   }, []);
+
+  const applyLiveMeterLevel = useCallback((level: number) => {
+    const normalized = clampNumber(level, 0, 1);
+    hasMeteringSampleRef.current = true;
+    lastMeteringTickMsRef.current = Date.now();
+    clearWarmupWaveTimer();
+
+    const point = Math.round(normalized * 100);
+    recordedLevelsRef.current.push(point);
+    if (recordedLevelsRef.current.length > 240) {
+      recordedLevelsRef.current.shift();
+    }
+
+    setLiveWaveform((prev) => {
+      const last = lastLiveWaveLevelRef.current;
+      let responsiveLevel: number;
+      if (normalized >= last) {
+        wavePeakHoldRef.current = 2;
+        responsiveLevel = last + (normalized - last) * WAVE_ATTACK_ALPHA;
+      } else {
+        const releaseAlpha = wavePeakHoldRef.current > 0 ? 0.14 : WAVE_RELEASE_ALPHA;
+        wavePeakHoldRef.current = Math.max(0, wavePeakHoldRef.current - 1);
+        responsiveLevel = last + (normalized - last) * releaseAlpha;
+      }
+      responsiveLevel = clampNumber(responsiveLevel, 0, 1);
+      lastLiveWaveLevelRef.current = responsiveLevel;
+      const next = prev.slice(1);
+      next.push(responsiveLevel);
+      return next;
+    });
+  }, [clearWarmupWaveTimer]);
+
+  const stopWebAudioAnalyser = useCallback(async () => {
+    if (webAnalyserTimerRef.current) {
+      clearInterval(webAnalyserTimerRef.current);
+      webAnalyserTimerRef.current = null;
+    }
+
+    try {
+      webMicSourceRef.current?.disconnect?.();
+    } catch {
+      // ignore disconnect errors
+    }
+    try {
+      webAnalyserRef.current?.disconnect?.();
+    } catch {
+      // ignore disconnect errors
+    }
+
+    if (webMicStreamRef.current) {
+      try {
+        webMicStreamRef.current.getTracks().forEach((track: any) => track.stop());
+      } catch {
+        // ignore track stop errors
+      }
+    }
+
+    if (webAudioContextRef.current) {
+      try {
+        if (webAudioContextRef.current.state !== 'closed') {
+          await webAudioContextRef.current.close();
+        }
+      } catch {
+        // ignore close errors
+      }
+    }
+
+    webMicSourceRef.current = null;
+    webAnalyserRef.current = null;
+    webMicStreamRef.current = null;
+    webAudioContextRef.current = null;
+  }, []);
+
+  const startWebAudioAnalyser = useCallback(async () => {
+    if (Platform.OS !== 'web') return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
+    if (typeof window === 'undefined') return;
+
+    await stopWebAudioAnalyser();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        } as any,
+      });
+
+      const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const context = new AudioContextCtor();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.2;
+      source.connect(analyser);
+
+      const samples = new Uint8Array(analyser.fftSize);
+
+      webAudioContextRef.current = context;
+      webMicSourceRef.current = source;
+      webAnalyserRef.current = analyser;
+      webMicStreamRef.current = stream;
+
+      webAnalyserTimerRef.current = window.setInterval(() => {
+        if (!isRecordingUiRef.current) return;
+        analyser.getByteTimeDomainData(samples);
+        let sumSquares = 0;
+        for (let index = 0; index < samples.length; index += 1) {
+          const centered = (samples[index] - 128) / 128;
+          sumSquares += centered * centered;
+        }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        const boosted = clampNumber(Math.pow(rms * 3.2, 0.85), 0, 1);
+        if (Date.now() - lastMeteringTickMsRef.current > WEB_ANALYSER_METER_FALLBACK_AFTER_MS) {
+          applyLiveMeterLevel(boosted);
+        }
+      }, WEB_ANALYSER_POLL_MS);
+    } catch (error) {
+      console.warn('Web analyser start failed:', error);
+      await stopWebAudioAnalyser();
+    }
+  }, [applyLiveMeterLevel, stopWebAudioAnalyser]);
 
   const stopAndUnloadSafely = useCallback(async (recording: any) => {
     if (!recording) return;
@@ -357,6 +506,7 @@ function ChatInputBar({
 
   const prepareRecorderInBackground = useCallback(async () => {
     if (!micPermissionGrantedRef.current) return;
+    if (appStateRef.current !== 'active') return;
     if (
       preparedRecordingRef.current ||
       prepareRecordingPromiseRef.current ||
@@ -392,11 +542,7 @@ function ChatInputBar({
           return;
         }
         await stopAndUnloadSafely(recording);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (!errorMessage.includes('Only one Recording object can be prepared at a given time')) {
-          console.error('Recorder pre-initialize error:', error);
-        }
+      } catch {
         await stopAndUnloadSafely(recording);
       } finally {
         if (preparingRecordingRef.current === recording) {
@@ -415,6 +561,24 @@ function ChatInputBar({
       }
     }
   }, [stopAndUnloadSafely]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      appStateRef.current = nextState;
+      if (
+        nextState === 'active'
+        && micPermissionGrantedRef.current
+        && !isRecordingUiRef.current
+        && !isStartingRecordingRef.current
+      ) {
+        void prepareRecorderInBackground();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [prepareRecorderInBackground]);
 
   const acquirePreparedRecording = useCallback(async (): Promise<any> => {
     if (preparedRecordingRef.current) {
@@ -479,10 +643,14 @@ function ChatInputBar({
     setRecordingDuration(0);
     setShowDeletedHint(false);
     setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
+    lastMeteringTickMsRef.current = 0;
+    lastLiveWaveLevelRef.current = 0.12;
+    wavePeakHoldRef.current = 0;
+    void stopWebAudioAnalyser();
     resetSlideToCancel();
     clearRecordingTimer();
     clearWarmupWaveTimer();
-  }, [clearRecordingTimer, clearWarmupWaveTimer, isMicGestureActiveShared, isMicGestureFinalizeHandledShared, resetSlideToCancel]);
+  }, [clearRecordingTimer, clearWarmupWaveTimer, isMicGestureActiveShared, isMicGestureFinalizeHandledShared, resetSlideToCancel, stopWebAudioAnalyser]);
 
   useEffect(() => {
     if (!isRecording) {
@@ -559,11 +727,12 @@ function ChatInputBar({
       preparedRecordingRef.current = null;
       preparingRecordingRef.current = null;
       prepareRecordingPromiseRef.current = null;
+      void stopWebAudioAnalyser();
       void stopAndUnloadSafely(activeRecording);
       void stopAndUnloadSafely(preparedRecording);
       void stopAndUnloadSafely(preparingRecording);
     };
-  }, [stopAndUnloadSafely]);
+  }, [stopAndUnloadSafely, stopWebAudioAnalyser]);
 
   // Keyboard visibility tracking
   useEffect(() => {
@@ -801,25 +970,19 @@ function ChatInputBar({
       attemptedRecording = await acquirePreparedRecording();
       recordingRef.current = attemptedRecording;
 
+      if (Platform.OS === 'web') {
+        void startWebAudioAnalyser();
+      }
+
       attemptedRecording.setOnRecordingStatusUpdate((status: any) => {
         if (!status?.canRecord) return;
-        hasMeteringSampleRef.current = true;
-        clearWarmupWaveTimer();
         const normalized = normalizeMetering(status.metering);
-        const point = Math.round(normalized * 100);
-        recordedLevelsRef.current.push(point);
-        if (recordedLevelsRef.current.length > 240) {
-          recordedLevelsRef.current.shift();
+        if (normalized === null) {
+          return;
         }
-        setLiveWaveform((prev) => {
-          const last = prev[prev.length - 1] ?? normalized;
-          const responsiveLevel = last + (normalized - last) * WAVE_RESPONSE_ALPHA;
-          const next = prev.slice(1);
-          next.push(responsiveLevel);
-          return next;
-        });
+        applyLiveMeterLevel(normalized);
       });
-      attemptedRecording.setProgressUpdateInterval(55);
+      attemptedRecording.setProgressUpdateInterval(35);
       await attemptedRecording.startAsync();
       isStartingRecordingRef.current = false;
 
@@ -835,6 +998,7 @@ function ChatInputBar({
       isStartingRecordingRef.current = false;
       pendingStopDiscardRef.current = null;
       hasMeteringSampleRef.current = false;
+      await stopWebAudioAnalyser();
       await stopAndUnloadSafely(attemptedRecording);
       resetRecordingState();
       if (error instanceof Error && error.message === 'MIC_PERMISSION_DENIED') {
@@ -850,10 +1014,12 @@ function ChatInputBar({
     }
   }, [
     acquirePreparedRecording,
-    clearWarmupWaveTimer,
+    applyLiveMeterLevel,
     normalizeMetering,
     prepareRecorderInBackground,
     resetRecordingState,
+    startWebAudioAnalyser,
+    stopWebAudioAnalyser,
     stopAndUnloadSafely,
     stopRecording,
   ]);
@@ -872,6 +1038,7 @@ function ChatInputBar({
     pendingStopDiscardRef.current = null;
     recordedLevelsRef.current = [];
     hasMeteringSampleRef.current = false;
+    lastMeteringTickMsRef.current = 0;
     recordingDurationRef.current = 0;
     setRecordingDuration(0);
     setLiveWaveform(Array.from({ length: LIVE_WAVE_BAR_COUNT }, () => 0.12));
