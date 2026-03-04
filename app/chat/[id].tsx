@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { View, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, Button } from 'react-native-paper';
+import { Text, Button, Snackbar } from 'react-native-paper';
 import { useMessages } from '../../src/hooks/useMessages';
 import { useAuth } from '../../src/hooks/useAuth';
 import ChatRoom from '../../src/components/messaging/ChatRoom';
@@ -51,6 +51,13 @@ const getAvatarUrl = (profile?: User | null): string | undefined => {
   return profile?.avatarUrl || profile?.photoURL || undefined;
 };
 
+type PendingMessageDelete = {
+  scope: 'me' | 'everyone';
+  conversationId: string;
+  messageId: string;
+  userId: string;
+};
+
 export default function ChatScreen() {
   const { theme } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -63,7 +70,10 @@ export default function ChatScreen() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [propertyRefs, setPropertyRefs] = useState<Property[]>([]);
+  const [pendingMessageDelete, setPendingMessageDelete] = useState<PendingMessageDelete | null>(null);
+  const [deleteSnackbarVisible, setDeleteSnackbarVisible] = useState(false);
   const uploadTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Find the conversation from the conversations list
   useEffect(() => {
@@ -278,6 +288,10 @@ export default function ChatScreen() {
         clearInterval(timer);
       }
       uploadTimersRef.current.clear();
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -571,15 +585,70 @@ export default function ChatScreen() {
     await handleSendMessage('Property offer', undefined, undefined, 'property_offer', propertyId);
   };
 
+  const commitMessageDelete = useCallback(
+    async (action: PendingMessageDelete) => {
+      if (action.scope === 'me') {
+        const result = await deleteMessageForMe(action.conversationId, action.messageId, action.userId);
+        if (!result.success) {
+          Alert.alert('Error', result.error || 'Failed to delete message');
+          return;
+        }
+        setChatMessages((prev) => prev.filter((item) => item.id !== action.messageId));
+        return;
+      }
+
+      const result = await deleteMessageForEveryone(action.conversationId, action.messageId, action.userId);
+      if (!result.success) {
+        Alert.alert('Error', result.error || 'Failed to delete message');
+        return;
+      }
+      setChatMessages((prev) =>
+        prev.map((item) =>
+          item.id === action.messageId
+            ? { ...item, deleted_for_everyone: true, deleted_by: action.userId, content: '' }
+            : item
+        )
+      );
+    },
+    [deleteMessageForEveryone, deleteMessageForMe]
+  );
+
+  const queueMessageDelete = useCallback(
+    (action: PendingMessageDelete) => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+
+      setPendingMessageDelete(action);
+      setDeleteSnackbarVisible(true);
+
+      deleteTimerRef.current = setTimeout(() => {
+        setDeleteSnackbarVisible(false);
+        setPendingMessageDelete(null);
+        void commitMessageDelete(action);
+      }, 5000);
+    },
+    [commitMessageDelete]
+  );
+
+  const handleUndoDeleteMessage = useCallback(() => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setDeleteSnackbarVisible(false);
+    setPendingMessageDelete(null);
+  }, []);
+
   const handleDeleteMessageForMe = async (message: Message) => {
     if (!user?.uid || !conversation) return;
-
-    const result = await deleteMessageForMe(conversation.id, message.id, user.uid);
-    if (!result.success) {
-      Alert.alert('Error', result.error || 'Failed to delete message');
-    } else {
-      setChatMessages(prev => prev.filter(item => item.id !== message.id));
-    }
+    queueMessageDelete({
+      scope: 'me',
+      conversationId: conversation.id,
+      messageId: message.id,
+      userId: user.uid,
+    });
   };
 
   const handleDeleteMessageForEveryone = async (message: Message) => {
@@ -587,22 +656,15 @@ export default function ChatScreen() {
 
     confirmAction({
       title: 'Delete Message',
-      message: 'Delete this message for everyone? This cannot be undone.',
+      message: 'Delete this message for everyone? You can undo for 5 seconds.',
       confirmText: 'Delete',
-      onConfirm: async () => {
-        const result = await deleteMessageForEveryone(conversation.id, message.id, user.uid);
-        if (!result.success) {
-          Alert.alert('Error', result.error || 'Failed to delete message');
-          return;
-        }
-        setChatMessages(prev =>
-          prev.map(item =>
-            item.id === message.id
-              ? { ...item, deleted_for_everyone: true, deleted_by: user.uid, content: '' }
-              : item
-          )
-        );
-      },
+      onConfirm: () =>
+        queueMessageDelete({
+          scope: 'everyone',
+          conversationId: conversation.id,
+          messageId: message.id,
+          userId: user.uid,
+        }),
     });
   };
 
@@ -690,6 +752,21 @@ export default function ChatScreen() {
             onSendPropertyOffer={handleSendPropertyOffer}
           />
         </View>
+        <Snackbar
+          visible={deleteSnackbarVisible}
+          onDismiss={() => setDeleteSnackbarVisible(false)}
+          duration={5200}
+          action={
+            pendingMessageDelete
+              ? {
+                  label: 'Undo',
+                  onPress: handleUndoDeleteMessage,
+                }
+              : undefined
+          }
+        >
+          Message will be deleted in 5 seconds
+        </Snackbar>
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

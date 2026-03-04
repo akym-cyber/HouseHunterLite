@@ -2,10 +2,8 @@
 import {
   View,
   StyleSheet,
-  FlatList,
   ScrollView,
   RefreshControl,
-  Image,
   TouchableOpacity,
   Platform,
 } from 'react-native';
@@ -16,6 +14,7 @@ import {
   Title,
   Chip,
   Button,
+  Snackbar,
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useFavorites } from '../../src/hooks/useFavorites';
@@ -24,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Property } from '../../src/types/database';
 import { formatPrice } from '../../src/utils/constants';
 import PropertyMediaCarousel from '../../src/components/property/PropertyMediaCarousel';
+import { addRecentlyViewedPropertyId } from '../../src/utils/recentlyViewed';
 
 const getLocationString = (item: Property) => {
   // Show Kenyan location hierarchy: Estate, County, Kenya
@@ -40,8 +40,11 @@ const getLocationString = (item: Property) => {
 
 export default function FavoritesScreen() {
   const { theme } = useTheme();
-  const { favorites, loading, error, refreshFavorites, toggleFavorite, isFavorite } = useFavorites();
+  const { favorites, loading, error, refreshFavorites, toggleFavorite, addToFavorites, isFavorite } = useFavorites();
   const [refreshing, setRefreshing] = useState(false);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [undoFavoritePropertyId, setUndoFavoritePropertyId] = useState<string | null>(null);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const onRefresh = async () => {
@@ -51,7 +54,25 @@ export default function FavoritesScreen() {
   };
 
   const handleToggleFavorite = async (propertyId: string) => {
-    await toggleFavorite(propertyId);
+    const result = await toggleFavorite(propertyId);
+    if (!result.success) return;
+
+    if (result.action === 'removed') {
+      setUndoFavoritePropertyId(propertyId);
+      setSnackbarMessage('Removed from favorites');
+      setSnackbarVisible(true);
+    }
+  };
+
+  const handleUndoFavorite = async () => {
+    if (!undoFavoritePropertyId) {
+      setSnackbarVisible(false);
+      return;
+    }
+
+    await addToFavorites(undoFavoritePropertyId);
+    setSnackbarVisible(false);
+    setUndoFavoritePropertyId(null);
   };
 
   const renderPropertyCard = ({ item }: { item: Property }) => (
@@ -79,7 +100,10 @@ export default function FavoritesScreen() {
       </View>
       <TouchableOpacity
         activeOpacity={0.8}
-        onPress={() => router.push(`/property/${item.id}`)}
+        onPress={async () => {
+          await addRecentlyViewedPropertyId(item.id);
+          router.push(`/property/${item.id}`);
+        }}
       >
         <Card.Content style={styles.propertyContent}>
         <Title style={styles.propertyTitle} numberOfLines={1}>
@@ -127,6 +151,21 @@ export default function FavoritesScreen() {
     </Card>
   );
 
+  const renderSkeletonCard = (key: string) => (
+    <Card key={key} style={styles.skeletonCard} mode="contained">
+      <View style={styles.skeletonMedia} />
+      <Card.Content style={styles.skeletonContent}>
+        <View style={[styles.skeletonLine, styles.skeletonTitle]} />
+        <View style={[styles.skeletonLine, styles.skeletonSubtitle]} />
+        <View style={styles.skeletonChipRow}>
+          <View style={[styles.skeletonChip, styles.skeletonChipShort]} />
+          <View style={[styles.skeletonChip, styles.skeletonChipShort]} />
+          <View style={[styles.skeletonChip, styles.skeletonChipLong]} />
+        </View>
+      </Card.Content>
+    </Card>
+  );
+
   return (
     <View style={styles.container}>
       {/* Fixed Header */}
@@ -144,12 +183,19 @@ export default function FavoritesScreen() {
           }
         >
         {loading ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>⏳</Text>
-            <Title style={styles.emptyTitle}>Loading...</Title>
-            <Text style={styles.emptyText}>
-              Fetching your favorite properties
-            </Text>
+          <>
+            {renderSkeletonCard('favorites-skeleton-1')}
+            {renderSkeletonCard('favorites-skeleton-2')}
+            {renderSkeletonCard('favorites-skeleton-3')}
+          </>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.emptyIcon}>⚠️</Text>
+            <Title style={styles.emptyTitle}>Couldn't load favorites</Title>
+            <Text style={styles.emptyText}>{error}</Text>
+            <Button mode="outlined" onPress={onRefresh} style={styles.emptyButton}>
+              Retry
+            </Button>
           </View>
         ) : favorites.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -176,6 +222,24 @@ export default function FavoritesScreen() {
             ))
         )}
       </ScrollView>
+      <Snackbar
+        visible={snackbarVisible}
+        onDismiss={() => {
+          setSnackbarVisible(false);
+          setUndoFavoritePropertyId(null);
+        }}
+        duration={3500}
+        action={
+          undoFavoritePropertyId
+            ? {
+                label: 'Undo',
+                onPress: handleUndoFavorite,
+              }
+            : undefined
+        }
+      >
+        {snackbarMessage}
+      </Snackbar>
       </SafeAreaView>
     </View>
   );
@@ -287,6 +351,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
     alignItems: 'center',
     padding: 40,
   },
+  errorContainer: {
+    alignItems: 'center',
+    padding: 32,
+  },
   emptyIcon: {
     fontSize: 48,
     marginBottom: 16,
@@ -301,6 +369,50 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   emptyButton: {
     marginTop: 16,
+  },
+  skeletonCard: {
+    marginBottom: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  skeletonMedia: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  skeletonContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+  },
+  skeletonLine: {
+    borderRadius: 8,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  skeletonTitle: {
+    height: 16,
+    width: '58%',
+    marginBottom: 10,
+  },
+  skeletonSubtitle: {
+    height: 12,
+    width: '72%',
+    marginBottom: 12,
+  },
+  skeletonChipRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  skeletonChip: {
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  skeletonChipShort: {
+    width: 72,
+  },
+  skeletonChipLong: {
+    width: 100,
   },
   scrollView: {
     flex: 1,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -14,6 +14,7 @@ import {
   Divider,
   Button,
   Searchbar,
+  Snackbar,
 } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMessages } from '../../src/hooks/useMessages';
@@ -113,6 +114,9 @@ export default function MessagesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [authCheckDone, setAuthCheckDone] = useState(false);
   const [userProfiles, setUserProfiles] = useState<Record<string, User | null>>({});
+  const [deleteSnackbarVisible, setDeleteSnackbarVisible] = useState(false);
+  const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Auth check timeout protection
@@ -122,6 +126,15 @@ export default function MessagesScreen() {
     }, 3000); // 3 second timeout
 
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
   }, []);
 
   const mergedConversations = useMemo(() => {
@@ -246,17 +259,44 @@ export default function MessagesScreen() {
     router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
   };
 
+  const commitDeleteConversation = async (conversationId: string) => {
+    const result = await deleteConversation(conversationId);
+    if (!result.success) {
+      Alert.alert('Error', result.error || 'Failed to delete conversation');
+    }
+  };
+
+  const queueConversationDelete = (conversationId: string) => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+
+    setPendingDeleteConversationId(conversationId);
+    setDeleteSnackbarVisible(true);
+
+    deleteTimerRef.current = setTimeout(() => {
+      setDeleteSnackbarVisible(false);
+      setPendingDeleteConversationId(null);
+      commitDeleteConversation(conversationId);
+    }, 5000);
+  };
+
+  const handleUndoDeleteConversation = () => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setDeleteSnackbarVisible(false);
+    setPendingDeleteConversationId(null);
+  };
+
   const handleDeleteConversation = (conversation: Conversation) => {
     confirmAction({
       title: 'Delete Conversation',
-      message: 'Delete this conversation? This cannot be undone.',
+      message: 'Delete this conversation? You can undo for 5 seconds.',
       confirmText: 'Delete',
-      onConfirm: async () => {
-        const result = await deleteConversation(conversation.id);
-        if (!result.success) {
-          Alert.alert('Error', result.error || 'Failed to delete conversation');
-        }
-      },
+      onConfirm: () => queueConversationDelete(conversation.id),
     });
   };
 
@@ -464,6 +504,21 @@ export default function MessagesScreen() {
           ListEmptyComponent={searchQuery ? renderEmptySearch : renderEmpty}
         />
       </SafeAreaView>
+      <Snackbar
+        visible={deleteSnackbarVisible}
+        onDismiss={() => setDeleteSnackbarVisible(false)}
+        duration={5200}
+        action={
+          pendingDeleteConversationId
+            ? {
+                label: 'Undo',
+                onPress: handleUndoDeleteConversation,
+              }
+            : undefined
+        }
+      >
+        Conversation will be deleted in 5 seconds
+      </Snackbar>
     </View>
   );
 }

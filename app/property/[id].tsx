@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,6 +21,7 @@ import {
   FAB,
   Dialog,
   Portal,
+  Snackbar,
 } from 'react-native-paper';
 import { useTheme } from '../../src/theme/useTheme';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -52,6 +53,9 @@ export default function PropertyDetailsScreen() {
   const [applyVisible, setApplyVisible] = useState(false);
   const [applyMessage, setApplyMessage] = useState('');
   const [applySubmitting, setApplySubmitting] = useState(false);
+  const [deleteSnackbarVisible, setDeleteSnackbarVisible] = useState(false);
+  const [pendingDeletePropertyId, setPendingDeletePropertyId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const propertyId = Array.isArray(id) ? id[0] : id;
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -100,6 +104,15 @@ export default function PropertyDetailsScreen() {
         setIsFetchingById(false);
       });
   }, [propertyId, propertyFromList, propertiesLoading, isFetchingById, fetchedProperty]);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleContactOwner = async () => {
     if (!user) {
@@ -334,72 +347,67 @@ export default function PropertyDetailsScreen() {
     }
   };
 
-  const handleDeleteProperty = async () => {
-    console.log('[PropertyDetail] handleDeleteProperty called');
-    if (!property) {
-      console.log('[PropertyDetail] No property to delete');
+  const commitDeleteProperty = async (targetPropertyId: string) => {
+    setIsDeleting(true);
+    try {
+      const result = await deleteProperty(targetPropertyId);
+      if (result.success) {
+        showAlert('Success', 'Property deleted successfully');
+        router.back();
+      } else {
+        showAlert('Error', result.error || 'Failed to delete property');
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const queuePropertyDelete = (targetPropertyId: string) => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+
+    setPendingDeletePropertyId(targetPropertyId);
+    setDeleteSnackbarVisible(true);
+
+    deleteTimerRef.current = setTimeout(() => {
+      setDeleteSnackbarVisible(false);
+      setPendingDeletePropertyId(null);
+      commitDeleteProperty(targetPropertyId);
+    }, 5000);
+  };
+
+  const handleUndoDelete = () => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setDeleteSnackbarVisible(false);
+    setPendingDeletePropertyId(null);
+  };
+
+  const handleDeleteProperty = () => {
+    if (!property) return;
+
+    const confirmText = 'Delete this property? You can undo for 5 seconds.';
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm(confirmText);
+      if (confirmed) {
+        queuePropertyDelete(property.id);
+      }
       return;
     }
 
-    console.log('[PropertyDetail] Starting delete for property:', property.id);
-
-    // Skip confirmation on web for testing - directly delete
-    if (Platform.OS === 'web') {
-      console.log('[PropertyDetail] Web platform detected - skipping confirmation');
-      setIsDeleting(true);
-      try {
-        const result = await deleteProperty(property.id);
-        console.log('[PropertyDetail] Delete result:', result);
-        if (result.success) {
-          console.log('[PropertyDetail] Delete successful, navigating back');
-          alert('Property deleted successfully'); // Use browser alert on web
-          // Navigate back to previous screen (likely home tab)
-          router.back();
-        } else {
-          console.log('[PropertyDetail] Delete failed:', result.error);
-          alert(result.error || 'Failed to delete property'); // Use browser alert on web
-        }
-      } finally {
-        setIsDeleting(false);
-      }
-    } else {
-      // Mobile - use Alert.alert
-      console.log('[PropertyDetail] Mobile platform - showing confirmation dialog');
-      Alert.alert(
-        'Delete Property',
-        'Are you sure you want to delete this property? This action cannot be undone.',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => console.log('[PropertyDetail] User cancelled delete')
-          },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              console.log('[PropertyDetail] User confirmed delete, starting deletion');
-              setIsDeleting(true);
-              try {
-                const result = await deleteProperty(property.id);
-                console.log('[PropertyDetail] Delete result:', result);
-                if (result.success) {
-                  console.log('[PropertyDetail] Delete successful, navigating back');
-                  Alert.alert('Success', 'Property deleted successfully');
-                  // Navigate back to previous screen (likely home tab)
-                  router.back();
-                } else {
-                  console.log('[PropertyDetail] Delete failed:', result.error);
-                  Alert.alert('Error', result.error || 'Failed to delete property');
-                }
-              } finally {
-                setIsDeleting(false);
-              }
-            }
-          }
-        ]
-      );
-    }
+    Alert.alert('Delete Property', confirmText, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => queuePropertyDelete(property.id),
+      },
+    ]);
   };
 
   if ((propertiesLoading || isFetchingById) && !property) {
@@ -665,6 +673,21 @@ export default function PropertyDetailsScreen() {
             </Dialog.Actions>
           </Dialog>
         </Portal>
+        <Snackbar
+          visible={deleteSnackbarVisible}
+          onDismiss={() => setDeleteSnackbarVisible(false)}
+          duration={5200}
+          action={
+            pendingDeletePropertyId
+              ? {
+                  label: 'Undo',
+                  onPress: handleUndoDelete,
+                }
+              : undefined
+          }
+        >
+          Property will be deleted in 5 seconds
+        </Snackbar>
       </SafeAreaView>
     </View>
   );

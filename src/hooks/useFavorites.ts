@@ -201,6 +201,7 @@ export const useFavorites = () => {
     const currentlyFavorite = hasOptimisticValue
       ? optimisticFavoriteMap[propertyId]
       : state.favorites.some((fav) => fav.id === propertyId);
+    const action = currentlyFavorite ? 'removed' : 'added';
     const nextFavoriteState = !currentlyFavorite;
 
     setOptimisticFavoriteMap((prev) => ({
@@ -220,7 +221,11 @@ export const useFavorites = () => {
       });
     }
 
-    return result;
+    return {
+      ...result,
+      action,
+      propertyId,
+    };
   };
 
   const isFavorite = (propertyId: string) => {

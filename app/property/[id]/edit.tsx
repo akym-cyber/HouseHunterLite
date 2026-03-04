@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,6 +16,7 @@ import {
   Chip,
   ProgressBar,
   IconButton,
+  Snackbar,
 } from 'react-native-paper';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useTheme } from '../../../src/theme/useTheme';
@@ -48,6 +49,9 @@ export default function EditPropertyScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteSnackbarVisible, setDeleteSnackbarVisible] = useState(false);
+  const [pendingDeletePropertyId, setPendingDeletePropertyId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [fileProgress, setFileProgress] = useState<Record<string, number>>({});
   const [media, setMedia] = useState<MediaFile[]>([]);
@@ -87,6 +91,15 @@ export default function EditPropertyScreen() {
       fetchProperty();
     }
   }, [id]);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const fetchProperty = async () => {
     if (!id) return;
@@ -355,33 +368,55 @@ export default function EditPropertyScreen() {
     }
   };
 
+  const commitDeleteProperty = async (targetPropertyId: string) => {
+    setIsDeleting(true);
+    try {
+      const result = await deleteProperty(targetPropertyId);
+      if (result.success) {
+        Alert.alert('Success', 'Property deleted successfully');
+        router.back();
+      } else {
+        Alert.alert('Error', result.error || 'Failed to delete property');
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const queuePropertyDelete = (targetPropertyId: string) => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+
+    setPendingDeletePropertyId(targetPropertyId);
+    setDeleteSnackbarVisible(true);
+
+    deleteTimerRef.current = setTimeout(() => {
+      setDeleteSnackbarVisible(false);
+      setPendingDeletePropertyId(null);
+      commitDeleteProperty(targetPropertyId);
+    }, 5000);
+  };
+
+  const handleUndoDelete = () => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setDeleteSnackbarVisible(false);
+    setPendingDeletePropertyId(null);
+  };
+
   const handleDeleteProperty = () => {
-    Alert.alert(
-      'Delete Property',
-      'Are you sure you want to delete this property? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setIsDeleting(true);
-            try {
-              const result = await deleteProperty(id);
-              if (result.success) {
-                Alert.alert('Success', 'Property deleted successfully');
-                // Navigate back to previous screen (likely home tab showing properties)
-                router.back();
-              } else {
-                Alert.alert('Error', result.error || 'Failed to delete property');
-              }
-            } finally {
-              setIsDeleting(false);
-            }
-          }
-        }
-      ]
-    );
+    Alert.alert('Delete Property', 'Delete this property? You can undo for 5 seconds.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => queuePropertyDelete(id),
+      },
+    ]);
   };
 
   if (loading) {
@@ -765,6 +800,21 @@ export default function EditPropertyScreen() {
             </Button>
           </View>
         </SafeAreaView>
+        <Snackbar
+          visible={deleteSnackbarVisible}
+          onDismiss={() => setDeleteSnackbarVisible(false)}
+          duration={5200}
+          action={
+            pendingDeletePropertyId
+              ? {
+                  label: 'Undo',
+                  onPress: handleUndoDelete,
+                }
+              : undefined
+          }
+        >
+          Property will be deleted in 5 seconds
+        </Snackbar>
       </SafeAreaView>
     </View>
   );
