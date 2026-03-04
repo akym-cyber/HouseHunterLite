@@ -444,7 +444,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   favoriteHeartButton: {
     position: 'absolute',
     right: 10,
-    top: 7,
+    top: 6,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,

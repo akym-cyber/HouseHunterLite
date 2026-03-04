@@ -7,6 +7,7 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Text,
@@ -462,9 +463,17 @@ export default function PropertyDetailsScreen() {
         <Card style={styles.card}>
           <Card.Content>
             <Title style={styles.propertyTitle}>{property.title}</Title>
-            <Text style={styles.propertyLocation}>
-              📍 {property.addressLine1}, {property.city}, {property.state} {property.postalCode}
-            </Text>
+            <View style={styles.propertyLocationRow}>
+              <MaterialCommunityIcons
+                name="map-marker-outline"
+                size={15}
+                color={theme.colors.onSurfaceVariant}
+                style={styles.propertyLocationIcon}
+              />
+              <Text style={styles.propertyLocation} numberOfLines={1}>
+                {property.addressLine1}, {property.city}, {property.state} {property.postalCode}
+              </Text>
+            </View>
             <Text style={styles.propertyPrice}>
               {formatPrice(property.price, property.county || property.city)}
             </Text>
@@ -737,7 +746,15 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   },
   propertyLocation: {
     color: theme.colors.onSurfaceVariant,
+    flexShrink: 1,
+  },
+  propertyLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
+  },
+  propertyLocationIcon: {
+    marginRight: 4,
   },
   propertyPrice: {
     fontSize: 24,

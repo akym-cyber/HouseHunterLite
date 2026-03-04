@@ -73,7 +73,7 @@ export default function FavoritesScreen() {
           <MaterialCommunityIcons
             name={isFavorite(item.id) ? 'heart' : 'heart-outline'}
             size={30}
-            color="#EF4444"
+            color={isFavorite(item.id) ? theme.app.favoriteActive : theme.app.iconOnDark}
           />
         </TouchableOpacity>
       </View>
@@ -230,7 +230,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet
   favoriteHeartButton: {
     position: 'absolute',
     right: 10,
-    top: 8,
+    top: 6,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
